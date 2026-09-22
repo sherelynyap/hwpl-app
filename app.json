@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "HWPL",
+    "slug": "hwpl-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#111318"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourname.hwplapp"
+    },
+    "android": {
+      "package": "com.yourname.hwplapp",
+      "permissions": [
+        "SCHEDULE_EXACT_ALARM",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#6C5CE7"
+        }
+      ],
+      "expo-sqlite",
+      "expo-status-bar",
+      "@react-native-community/datetimepicker"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "567fc459-15ad-4a82-a7c2-e5c2bab394ce"
+      }
+    }
+  }
+}
