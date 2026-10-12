@@ -23,6 +23,14 @@ function monthLabelFor(date) {
   return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
+function moonCard(moonSign, theme) {
+  return (
+    <View style={[styles.todayCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <Text style={[styles.todayLabel, { color: theme.muted }]}>Today's Moon</Text>
+      <Text style={[styles.todaySign, { color: theme.accentText }]}>{moonSign}</Text>
+    </View>
+  );
+}
 export default function AstrologyScreen() {
   const { theme } = useTheme();
   const [chart, setChart] = useState(undefined); // undefined = loading, null = not set up
@@ -34,6 +42,7 @@ export default function AstrologyScreen() {
   const now = new Date();
   const monthKey = monthKeyFor(now);
   const transits = computeCurrentTransits(now);
+  const todayMoonSign = transits.moonSign;
   const moonPhase = computeMoonPhase(now);
   const moonQuarters = nextMoonQuarters(now);
   const retrogrades = computeRetrogrades(now).filter((r) => r.retrograde);
@@ -85,7 +94,7 @@ export default function AstrologyScreen() {
             onPress={() => setActivePage('sky')}
             style={[styles.pageTab, activePage === 'sky' && { backgroundColor: theme.accent }]}
           >
-            <Text style={[styles.pageTabText, { color: activePage === 'sky' ? '#fff' : theme.muted }]}>Moon & transits</Text>
+            <Text style={[styles.pageTabText, { color: activePage === 'sky' ? theme.primaryButtonText : theme.muted }]}>Moon & transits</Text>
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole="tab"
@@ -93,43 +102,48 @@ export default function AstrologyScreen() {
             onPress={() => setActivePage('chart')}
             style={[styles.pageTab, activePage === 'chart' && { backgroundColor: theme.accent }]}
           >
-            <Text style={[styles.pageTabText, { color: activePage === 'chart' ? '#fff' : theme.muted }]}>Birth chart</Text>
+            <Text style={[styles.pageTabText, { color: activePage === 'chart' ? theme.primaryButtonText : theme.muted }]}>Birth chart</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {activePage === 'sky' ? (
         <ScrollView style={styles.pageContent} contentContainerStyle={styles.pagePadding}>
-          <View style={styles.skyCard}>
+          <View style={[styles.skyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <View
               accessible
               accessibilityLabel={`${moonPhase.phaseName}, ${Math.round(moonPhase.illumination * 100)} percent illuminated`}
               style={styles.moonPhaseLayout}
             >
               <View style={styles.moonPhaseCopy}>
-                <Text numberOfLines={1} ellipsizeMode="tail" style={styles.moonPhaseText}>
+                <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.moonPhaseText, { color: theme.text }]}>
                   {moonPhase.phaseName}
                 </Text>
                 {moonQuarters.nextFullMoon && (
-                  <Text style={styles.skyDetail}>Next full moon: {moonQuarters.nextFullMoon.toLocaleDateString()}</Text>
+                  <Text style={[styles.skyDetail, { color: theme.muted }]}>
+                    Next full moon: {moonQuarters.nextFullMoon.toLocaleDateString()}
+                  </Text>
                 )}
                 {moonQuarters.nextNewMoon && (
-                  <Text style={styles.skyDetail}>Next new moon: {moonQuarters.nextNewMoon.toLocaleDateString()}</Text>
+                  <Text style={[styles.skyDetail, { color: theme.muted }]}>
+                    Next new moon: {moonQuarters.nextNewMoon.toLocaleDateString()}
+                  </Text>
                 )}
               </View>
               <View style={styles.moonPhaseVisual}>
-                <MoonPhaseVisual phaseAngle={moonPhase.phaseAngle} />
+                <MoonPhaseVisual phaseAngle={moonPhase.phaseAngle} theme={theme} />
               </View>
             </View>
             {retrogrades.length > 0 ? (
-              <Text style={styles.retrogradeText}>
+              <Text style={[styles.retrogradeText, { color: theme.accentText }]}>
                 Retrograde: {retrogrades.map((r) => PLANET_LABELS_SHORT[r.body]).join(', ')}
               </Text>
             ) : (
-              <Text style={styles.skyDetail}>No planets currently retrograde</Text>
+              <Text style={[styles.skyDetail, { color: theme.muted }]}>No planets currently retrograde</Text>
             )}
           </View>
 
+          {moonCard(todayMoonSign, theme)}
           <Text style={[styles.sectionHeading, { color: theme.text }]}>This month's transits</Text>
           <View style={styles.signRow}>
             <SignBadge label="Sun" value={transits.sunSign} />
@@ -156,7 +170,7 @@ export default function AstrologyScreen() {
                     <View key={p.body} style={styles.placementRow}>
                       <Text style={[styles.placementPlanet, { color: theme.muted }]}>{PLANET_LABELS[p.body] || p.body}</Text>
                       <Text style={[styles.placementSign, { color: theme.text }]}>{p.sign}</Text>
-                      {p.house && <Text style={[styles.placementHouse, { color: theme.accent }]}>House {p.house}</Text>}
+                      {p.house && <Text style={[styles.placementHouse, { color: theme.accentText }]}>House {p.house}</Text>}
                     </View>
                   ))}
                 </View>
@@ -175,7 +189,7 @@ export default function AstrologyScreen() {
               </View>
             )}
             <TouchableOpacity onPress={() => setEditing(true)} style={styles.editLink}>
-              <Text style={[styles.editLinkText, { color: theme.accent }]}>Edit birth chart</Text>
+              <Text style={[styles.editLinkText, { color: theme.accentText }]}>Edit birth chart</Text>
             </TouchableOpacity>
           </ScrollView>
         )
@@ -195,7 +209,7 @@ export default function AstrologyScreen() {
   );
 }
 
-function MoonPhaseVisual({ phaseAngle }) {
+function MoonPhaseVisual({ phaseAngle, theme }) {
   const size = 58;
   const center = size / 2;
   const radius = 24;
@@ -264,11 +278,20 @@ const styles = StyleSheet.create({
   placementPlanet: { width: 80 },
   placementSign: { fontWeight: '600', flex: 1 },
   placementHouse: { fontSize: 12 },
-  skyCard: { backgroundColor: '#1c1f26', borderRadius: 12, padding: 14, marginBottom: 20 },
+  skyCard: { borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 20 },
   moonPhaseLayout: { paddingRight: 64 },
   moonPhaseCopy: { flex: 1 },
   moonPhaseVisual: { position: 'absolute', right: 0, top: 0 },
-  moonPhaseText: { color: '#fff', fontWeight: '700', fontSize: 16, marginBottom: 2 },
-  skyDetail: { color: '#9aa0a6', fontSize: 13, marginBottom: 2 },
-  retrogradeText: { color: '#e74c3c', fontSize: 13, fontWeight: '600' },
+  moonPhaseText: { fontWeight: '700', fontSize: 16, marginBottom: 2 },
+  skyDetail: { fontSize: 13, marginBottom: 2 },
+  retrogradeText: { fontSize: 13, fontWeight: '600' },
+  todayCard: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+  },
+  todayLabel: { fontSize: 12, marginBottom: 4 },
+  todaySign: { fontSize: 22, fontWeight: '800' },
 });

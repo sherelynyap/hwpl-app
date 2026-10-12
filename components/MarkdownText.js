@@ -4,7 +4,7 @@ import { useTheme } from '../theme';
 
 export default function MarkdownText({ children, color }) {
   const { theme } = useTheme();
-  const accentColor = color || theme.accent;
+  const accentColor = color || theme.accentText;
 
   return (
     <Markdown style={markdownStyles(theme, accentColor)}>

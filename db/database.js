@@ -198,12 +198,27 @@ export async function getRatingsForDay(dateKey) {
 
 export async function updateRatingsForDay(dateKey, scores, note) {
   const db = await getDb();
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const recordedAt = new Date(year, month - 1, day, 12).toISOString().replace('T', ' ').slice(0, 19);
+
   await db.withTransactionAsync(async () => {
     for (const [category, score] of Object.entries(scores)) {
-      await db.runAsync(
-        "UPDATE ratings SET score = ?, note = ? WHERE category = ? AND date(created_at, 'localtime') = ?;",
-        [score, note, category, dateKey]
+      const existing = await db.getFirstAsync(
+        "SELECT id FROM ratings WHERE category = ? AND date(created_at, 'localtime') = ? LIMIT 1;",
+        [category, dateKey]
       );
+
+      if (existing) {
+        await db.runAsync(
+          "UPDATE ratings SET score = ?, note = ? WHERE category = ? AND date(created_at, 'localtime') = ?;",
+          [score, note, category, dateKey]
+        );
+      } else {
+        await db.runAsync(
+          'INSERT INTO ratings (category, score, note, created_at) VALUES (?, ?, ?, ?);',
+          [category, score, note, recordedAt]
+        );
+      }
     }
   });
 }
@@ -269,14 +284,36 @@ export async function deleteItem(id) {
 
 /* ---------------- Notes ---------------- */
 
+export function parseNoteTags(categoryValue) {
+  if (Array.isArray(categoryValue)) {
+    return categoryValue.map((tag) => String(tag).trim()).filter(Boolean);
+  }
+
+  if (!categoryValue) {
+    return [];
+  }
+
+  return String(categoryValue)
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+export function serializeNoteTags(categoryValue) {
+  const tags = [...new Set(parseNoteTags(categoryValue))];
+  return tags.length > 0 ? tags.join(',') : null;
+}
+
 export async function addNote(content, category = null) {
   const db = await getDb();
-  await db.runAsync('INSERT INTO notes (content, category) VALUES (?, ?);', [content, category]);
+  const tags = serializeNoteTags(category);
+  await db.runAsync('INSERT INTO notes (content, category) VALUES (?, ?);', [content, tags]);
 }
 
 export async function updateNote(id, content, category = null) {
   const db = await getDb();
-  await db.runAsync('UPDATE notes SET content = ?, category = ? WHERE id = ?;', [content, category, id]);
+  const tags = serializeNoteTags(category);
+  await db.runAsync('UPDATE notes SET content = ?, category = ? WHERE id = ?;', [content, tags, id]);
 }
 
 export async function getAllNotes() {

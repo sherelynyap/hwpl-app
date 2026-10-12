@@ -173,7 +173,7 @@ function AppContent() {
   return (
     <SafeAreaProvider>
       <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
-        <StatusBar style={themeKey === 'dark' ? 'light' : 'dark'} />
+        <StatusBar hidden style={themeKey === 'dark' ? 'light' : 'dark'} />
         {/* Giving each screen a `key` tied to the active tab remounts it on
             every switch, so its data reloads without needing React
             Navigation's focus-effect hooks. */}

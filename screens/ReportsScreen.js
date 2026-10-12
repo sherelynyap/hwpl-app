@@ -111,16 +111,12 @@ export default function ReportsScreen() {
     setLoadingDay(true);
     try {
       const rows = await getRatingsForDay(dateKey);
-      if (rows.length === 0) {
-        setSelectedDate(null);
-        return;
-      }
       const scores = { health: 0, work: 0, play: 0, love: 0 };
       for (const row of [...rows].reverse()) {
         scores[row.category] = row.score;
       }
       setDayScores(scores);
-      setDayNote(rows[0].note ?? '');
+      setDayNote(rows[0]?.note ?? '');
     } catch (error) {
       setSelectedDate(null);
       Alert.alert('Could not load rating', error.message);
@@ -247,15 +243,16 @@ export default function ReportsScreen() {
           {calendarCells.map((day, index) => {
             const dateKey = day ? getDateKey(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day)) : null;
             const wasRated = dateKey && ratedDays.includes(dateKey);
+            const canEditDay = dateKey && dateKey <= getDateKey(today);
             const isToday = dateKey === getDateKey(today);
             return (
               <TouchableOpacity
                 key={day ?? `empty-${index}`}
                 style={styles.dayCell}
-                onPress={() => wasRated && handleSelectDay(dateKey)}
-                disabled={!wasRated || loadingDay}
-                accessibilityRole={wasRated ? 'button' : undefined}
-                accessibilityLabel={wasRated ? `Edit rating for ${dateKey}` : undefined}
+                onPress={() => canEditDay && handleSelectDay(dateKey)}
+                disabled={!canEditDay || loadingDay}
+                accessibilityRole={canEditDay ? 'button' : undefined}
+                accessibilityLabel={canEditDay ? `${wasRated ? 'Edit rating' : 'Add missed rating'} for ${dateKey}` : undefined}
               >
                 {day ? (
                   <View
@@ -280,7 +277,7 @@ export default function ReportsScreen() {
           ) : (
             <>
               <View style={[styles.legendSwatch, { backgroundColor: theme.accent }]} />
-              <Text style={[styles.legendText, { color: theme.muted }]}>Daily rating saved</Text>
+              <Text style={[styles.legendText, { color: theme.muted }]}>Saved · tap any past date to add or edit</Text>
             </>
           )}
         </View>
@@ -296,7 +293,7 @@ export default function ReportsScreen() {
       <View style={styles.aiModalOverlay}>
         <View style={[styles.aiModal, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.aiModalHeader}>
-            <Text style={[styles.aiCardTitle, { color: theme.accent }]}>AI reflection</Text>
+            <Text style={[styles.aiCardTitle, { color: theme.accentText }]}>AI reflection</Text>
             <TouchableOpacity
               style={styles.aiModalClose}
               onPress={() => setAiSummary(null)}
@@ -321,7 +318,9 @@ export default function ReportsScreen() {
       <View style={styles.dayModalOverlay}>
         <View style={[styles.dayModal, { backgroundColor: theme.background }]}>
           <View style={styles.dayModalHeader}>
-            <Text style={[styles.dayModalTitle, { color: theme.text }]}>Edit rating</Text>
+            <Text style={[styles.dayModalTitle, { color: theme.text }]}>
+              {selectedDate && ratedDays.includes(selectedDate) ? 'Edit rating' : 'Add missed rating'}
+            </Text>
             <TouchableOpacity
               style={styles.dayModalClose}
               onPress={() => setSelectedDate(null)}
@@ -360,7 +359,7 @@ export default function ReportsScreen() {
                 </>
               ) : (
                 <>
-                  <Text style={[styles.dayPageSubtitle, { color: theme.muted }]}>Edit the optional note for this day.</Text>
+                  <Text style={[styles.dayPageSubtitle, { color: theme.muted }]}>Add or edit the optional note for this day.</Text>
                   <TextInput
                     style={[styles.dayNoteInput, { color: theme.text, backgroundColor: theme.surface, borderColor: theme.border }]}
                     value={dayNote}
@@ -383,7 +382,9 @@ export default function ReportsScreen() {
                       disabled={savingDay}
                       accessibilityRole="button"
                     >
-                      <Text style={[styles.daySaveText, { color: theme.primaryButtonText }]}>{savingDay ? 'Saving...' : 'Save changes'}</Text>
+                      <Text style={[styles.daySaveText, { color: theme.primaryButtonText }]}>
+                        {savingDay ? 'Saving...' : selectedDate && ratedDays.includes(selectedDate) ? 'Save changes' : 'Save rating'}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 </>
@@ -454,10 +455,17 @@ const styles = StyleSheet.create({
   dayPageSubtitle: { fontSize: 14, marginBottom: 12 },
   dayNoteInput: { minHeight: 100, borderWidth: 1, borderRadius: 8, padding: 12, textAlignVertical: 'top', marginTop: 4, marginBottom: 16 },
   dayButtonRow: { flexDirection: 'row', gap: 12 },
-  dayBackButton: { flex: 1, borderWidth: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  dayBackText: { fontSize: 16, fontWeight: '700' },
+  dayBackButton: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayBackText: { fontSize: 16, lineHeight: 20, fontWeight: '700', includeFontPadding: false },
   dayNextButton: { flex: 1 },
-  daySaveButton: { borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginBottom: 8 },
+  daySaveButton: { height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   daySaveDisabled: { opacity: 0.6 },
-  daySaveText: { fontSize: 16, fontWeight: '700' },
+  daySaveText: { fontSize: 16, lineHeight: 20, fontWeight: '700', includeFontPadding: false },
 });

@@ -13,9 +13,13 @@ import {
   TextInput,
   Animated,
   PanResponder,
+  KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import {
   addItem,
   getOpenItems,
@@ -66,6 +70,29 @@ function getDeadlineLabel(deadline) {
   if (daysUntilDeadline <= 7) return 'Due this week';
   if (daysUntilDeadline <= 14) return 'Due next week';
   return `Due ${deadline}`;
+}
+
+function getTagIcon(tagKey, color = '#fff', size) {
+  switch (tagKey) {
+    case 'health':
+      return <MaterialIcons name="health-and-safety" size={size} color={color} />;
+    case 'work':
+      return <MaterialIcons name="work" size={size} color={color} />;
+    case 'play':
+      return <MaterialCommunityIcons name="party-popper" size={size} color={color} />;
+    case 'love':
+      return <FontAwesome name="heart" size={size} color={color} />;
+    default:
+      return null;
+  }
+}
+
+function getNoteTags(categoryValue) {
+  if (!categoryValue) return [];
+  return String(categoryValue)
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
 }
 
 // This screen is remounted each time its tab becomes active (see App.js,
@@ -395,14 +422,20 @@ export default function ItemsScreen() {
                   onLongPress={() => startSelection('notes', item.id)}
                   delayLongPress={350}
                 >
-                  {item.category ? <Text style={[styles.noteCategory, { color: ({ health: '#2ecc71', work: '#3498db', play: '#f1c40f', love: '#e74c3c' })[item.category] ?? theme.muted }]}>{item.category}</Text> : null}
-                  <Text style={[styles.noteText, { color: theme.text }]}>{item.content}</Text>
+                  <Text style={[styles.noteText, { color: theme.text }]} numberOfLines={2}>{item.content}</Text>
                   <Text style={styles.noteDate}>{formatDate(item.created_at)}</Text>
                 </TouchableOpacity>
-                {selectionType !== 'notes' && (
-                  <TouchableOpacity style={styles.editButton} onPress={() => openEditNote(item)}>
-                    <Text style={[styles.editButtonText, { color: theme.muted }]}>Edit</Text>
-                  </TouchableOpacity>
+                {getNoteTags(item.category).length > 0 && (
+                  <View style={styles.noteTagsRight}>
+                    {getNoteTags(item.category).map((tagKey) => {
+                      const tagColor = ({ health: '#2ecc71', work: '#3498db', play: '#f1c40f', love: '#e74c3c' })[tagKey] ?? theme.muted;
+                      return (
+                        <View key={`${item.id}-${tagKey}`} style={[styles.noteTag, { backgroundColor: `${tagColor}33` }]}>
+                          {getTagIcon(tagKey, tagColor, 20)}
+                        </View>
+                      );
+                    })}
+                  </View>
                 )}
               </View>
             </SwipeableItem>
@@ -497,69 +530,103 @@ function SwipeableItem({ children, onDelete }) {
 function NoteFormModal({ visible, note, onClose, onSave }) {
   const { theme } = useTheme();
   const [content, setContent] = useState('');
-  const [category, setCategory] = useState(null);
+  const [selectedTags, setSelectedTags] = useState([]);
 
   useEffect(() => {
     if (visible) {
       setContent(note?.content || '');
-      setCategory(note?.category || null);
+      setSelectedTags(getNoteTags(note?.category));
     }
   }, [note, visible]);
 
   const handleSubmit = () => {
     const trimmedContent = content.trim();
-    if (trimmedContent) onSave({ content: trimmedContent, category });
+    if (trimmedContent) onSave({ content: trimmedContent, category: selectedTags });
   };
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={[styles.formContainer, { backgroundColor: theme.background }]}> 
-        <View style={styles.formHeader}>
-          <TouchableOpacity onPress={onClose}>
-            <Text style={[styles.cancelText, { color: theme.muted }]}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={[styles.formTitle, { color: theme.text }]}>{note ? 'Edit note' : 'New note'}</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-        <TextInput
-          style={[styles.formInput, { backgroundColor: theme.surface, color: theme.text }]}
-          placeholder="Write a note..."
-          placeholderTextColor="#888"
-          value={content}
-          onChangeText={setContent}
-          multiline
-          autoFocus
-          textAlignVertical="top"
-        />
-        <Text style={[styles.categoryLabel, { color: theme.muted }]}>Aspect</Text>
-        <View style={styles.categoryRow}>
-          {[
-            { key: null, label: 'None', color: theme.muted },
-            { key: 'health', label: 'Health', color: '#2ecc71' },
-            { key: 'work', label: 'Work', color: '#3498db' },
-            { key: 'play', label: 'Play', color: '#f1c40f' },
-            { key: 'love', label: 'Love', color: '#e74c3c' },
-          ].map((item) => (
-            <TouchableOpacity
-              key={item.key ?? 'none'}
-              style={[styles.categoryButton, { borderColor: item.color }, category === item.key && { backgroundColor: item.color }]}
-              onPress={() => setCategory(item.key)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: category === item.key }}
-              accessibilityLabel={`Tag note ${item.label}`}
-            >
-              <Text style={[styles.categoryButtonText, { color: category === item.key ? theme.background : item.color }]}>{item.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <TouchableOpacity
-          style={[styles.saveButton, { backgroundColor: theme.primaryButton }, !content.trim() && styles.disabledButton]}
-          onPress={handleSubmit}
-          disabled={!content.trim()}
+      <KeyboardAvoidingView
+        style={styles.formKeyboardAvoiding}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        enabled
+      >
+        <ScrollView
+          contentContainerStyle={styles.formScrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={[styles.saveButtonText, { color: theme.primaryButtonText }]}>{note ? 'Save changes' : 'Save note'}</Text>
-        </TouchableOpacity>
-      </View>
+          <View style={[styles.formContainer, { backgroundColor: theme.background }]}> 
+            <View style={styles.formHeader}>
+              <TouchableOpacity onPress={onClose}>
+                <Text style={[styles.cancelText, { color: theme.muted }]}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={[styles.formTitle, { color: theme.text }]}>{note ? 'Edit note' : 'New note'}</Text>
+              <TouchableOpacity
+                style={[styles.saveIconButton, { backgroundColor: theme.accent }, !content.trim() && styles.disabledButton]}
+                onPress={handleSubmit}
+                disabled={!content.trim()}
+                accessibilityRole="button"
+                accessibilityLabel={note ? 'Save changes' : 'Save note'}
+                accessibilityState={{ disabled: !content.trim() }}
+              >
+                <MaterialCommunityIcons name="check" size={24} color={theme.primaryButtonText} />
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={[styles.formInput, { backgroundColor: theme.surface, color: theme.text }]}
+              placeholder="Write a note..."
+              placeholderTextColor="#888"
+              value={content}
+              onChangeText={setContent}
+              multiline
+              autoFocus
+              textAlignVertical="top"
+              scrollEnabled
+            />
+            <Text style={[styles.categoryLabel, { color: theme.muted }]}>Tags</Text>
+            <View style={styles.categoryRow}>
+              {[
+                { key: 'none', label: 'None', color: theme.muted },
+                { key: 'health', label: 'Health', color: '#2ecc71' },
+                { key: 'work', label: 'Work', color: '#3498db' },
+                { key: 'play', label: 'Play', color: '#f1c40f' },
+                { key: 'love', label: 'Love', color: '#e74c3c' },
+              ].map((item) => {
+                const isSelected = item.key === 'none' ? selectedTags.length === 0 : selectedTags.includes(item.key);
+
+                return (
+                  <TouchableOpacity
+                    key={item.key ?? 'none'}
+                    style={[styles.categoryButton, { borderColor: item.color }, isSelected && { backgroundColor: item.color }]}
+                    onPress={() => {
+                      if (item.key === 'none') {
+                        setSelectedTags([]);
+                        return;
+                      }
+
+                      setSelectedTags((currentTags) =>
+                        currentTags.includes(item.key)
+                          ? currentTags.filter((tagKey) => tagKey !== item.key)
+                          : [...currentTags, item.key]
+                      );
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={item.key === 'none' ? 'Clear note tags' : `Tag note ${item.label}`}
+                  >
+                    {item.key === 'none' ? (
+                      <Text style={[styles.categoryButtonText, { color: isSelected ? theme.background : item.color }]}>{item.label}</Text>
+                    ) : (
+                      getTagIcon(item.key, isSelected ? theme.background : item.color, 24)
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -712,8 +779,16 @@ const styles = StyleSheet.create({
   itemMain: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   noteCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1c1f26', borderRadius: 10, padding: 12 },
   noteMain: { flex: 1 },
+  noteTagsRight: { flexDirection: 'row', alignItems: 'center', marginLeft: 8, gap: 6 },
+  noteTag: {
+    width: 38,
+    height: 38,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
   noteText: { color: '#fff', fontSize: 15 },
-  noteCategory: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize', marginBottom: 4 },
   noteDate: { color: '#666', fontSize: 11, marginTop: 6 },
   editButton: { paddingHorizontal: 8, paddingVertical: 6 },
   noteArchiveButton: { padding: 6 },
@@ -739,11 +814,13 @@ const styles = StyleSheet.create({
   dateButtonPlaceholder: { color: '#888' },
   clearButton: { paddingHorizontal: 10, justifyContent: 'center' },
   clearButtonText: { color: '#e74c3c', fontWeight: '600' },
+  formKeyboardAvoiding: { flex: 1 },
+  formScrollContent: { flexGrow: 1 },
   formContainer: { flex: 1, backgroundColor: '#111318', padding: 20, paddingTop: 60 },
   formHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 },
   formTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
   cancelText: { color: '#9aa0a6', fontSize: 16 },
-  headerSpacer: { width: 58 },
+  saveIconButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   formLabel: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 8, marginTop: 12 },
   formInput: {
     backgroundColor: '#1c1f26',
@@ -751,11 +828,20 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    minHeight: 160,
+    height: 220,
   },
   categoryLabel: { fontSize: 13, fontWeight: '600', marginTop: 18, marginBottom: 8 },
   categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  categoryButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  categoryButton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minWidth: 42,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   categoryButtonText: { fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
   saveButton: {
     borderRadius: 12,

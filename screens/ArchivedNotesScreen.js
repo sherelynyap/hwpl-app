@@ -60,7 +60,7 @@ export default function ArchivedNotesScreen({ onBack }) {
         renderItem={({ item }) => (
           <View style={[styles.noteRow, { backgroundColor: theme.surface }]}>
             <View style={styles.noteContent}>
-              <Text style={[styles.noteText, { color: theme.text }]}>{item.content}</Text>
+              <Text style={[styles.noteText, { color: theme.text }]} numberOfLines={2}>{item.content}</Text>
               <Text style={[styles.noteDate, { color: theme.muted }]}>{formatDate(item.created_at)}</Text>
             </View>
             <TouchableOpacity
