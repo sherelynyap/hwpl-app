@@ -1,6 +1,7 @@
 {
   "expo": {
-    "name": "HWPL",
+    "name": "Xis",
+    "icon": "./assets/icon.jpeg",
     "slug": "hwpl-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -16,7 +17,10 @@
       "bundleIdentifier": "com.yourname.hwplapp"
     },
     "android": {
+      "versionCode": 2,
+      "versionName": "1.1",
       "package": "com.yourname.hwplapp",
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "SCHEDULE_EXACT_ALARM",
         "POST_NOTIFICATIONS"
@@ -31,7 +35,8 @@
       ],
       "expo-sqlite",
       "expo-status-bar",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-sharing"
     ],
     "extra": {
       "eas": {

@@ -1,6 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, PanResponder } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { useTheme } from '../theme';
 
 const START_ANGLE = -135; // value = 0
 const END_ANGLE = 135;    // value = 5
@@ -31,9 +32,10 @@ function valueForRawAngle(rawAngle) {
   return Math.max(0, Math.min(5, Math.round(raw)));
 }
 
-export default function RatingDial({ value, onChange, color = '#6C5CE7', label, size = 130, readOnly = false, displayText }) {
+export default function RatingDial({ value, onChange, color = '#6C5CE7', label, size = 130, readOnly = false, displayText, compact = false, glow = false }) {
+  const { theme } = useTheme();
   const radius = size / 2;
-  const strokeWidth = 12;
+  const strokeWidth = compact ? Math.max(5, Math.round(size * 0.08)) : 12;
   const r = radius - strokeWidth;
   const cx = radius;
   const cy = radius;
@@ -63,18 +65,27 @@ export default function RatingDial({ value, onChange, color = '#6C5CE7', label, 
 
   return (
     <View style={styles.wrapper}>
-      {label ? <Text style={[styles.label, { color }]}>{label}</Text> : null}
+      {label ? <Text style={[styles.label, compact && styles.compactLabel, { color }]}>{label}</Text> : null}
       <View style={{ width: size, height: size }} {...panResponder.panHandlers}>
         <Svg width={size} height={size}>
-          <Path d={trackPath} stroke="#2a2e38" strokeWidth={strokeWidth} fill="none" strokeLinecap="round" />
-          {progressPath && (
-            <Path d={progressPath} stroke={color} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" />
+          {glow && (
+            <>
+              <Path d={trackPath} stroke={color} strokeWidth={strokeWidth + 10} strokeOpacity={0.1} fill="none" strokeLinecap="round" />
+              <Path d={trackPath} stroke={color} strokeWidth={strokeWidth + 5} strokeOpacity={0.14} fill="none" strokeLinecap="round" />
+            </>
           )}
-          <Circle cx={knobPos.x} cy={knobPos.y} r={strokeWidth / 2 + 4} fill="#111318" stroke={color} strokeWidth={3} />
+          <Path d={trackPath} stroke={theme.border} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" />
+          {progressPath && (
+            <>
+              {glow && <Path d={progressPath} stroke={color} strokeWidth={strokeWidth + 8} strokeOpacity={0.28} fill="none" strokeLinecap="round" />}
+              <Path d={progressPath} stroke={color} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" />
+            </>
+          )}
+          <Circle cx={knobPos.x} cy={knobPos.y} r={strokeWidth / 2 + 4} fill={theme.background} stroke={color} strokeWidth={3} />
         </Svg>
         <View style={styles.centerLabel} pointerEvents="none">
-          <Text style={styles.valueText}>{displayText ?? (value ?? 0)}</Text>
-          <Text style={styles.maxText}>/5</Text>
+          <Text style={[styles.valueText, compact && { fontSize: size * 0.24 }, { color: theme.text }]}>{displayText ?? (value ?? 0)}</Text>
+          <Text style={[styles.maxText, compact && { fontSize: Math.max(8, size * 0.09) }, { color: theme.muted }]}>/5</Text>
         </View>
       </View>
     </View>
@@ -84,6 +95,7 @@ export default function RatingDial({ value, onChange, color = '#6C5CE7', label, 
 const styles = StyleSheet.create({
   wrapper: { alignItems: 'center', marginBottom: 12 },
   label: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  compactLabel: { fontSize: 12, marginBottom: 4 },
   centerLabel: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   valueText: { color: '#fff', fontSize: 30, fontWeight: '800' },
   maxText: { color: '#9aa0a6', fontSize: 12, marginTop: -4 },

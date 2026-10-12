@@ -12,8 +12,17 @@ import {
   PanResponder,
 } from 'react-native';
 import { addNote, getAllNotes, updateNote, deleteNote } from '../db/database';
+import { useTheme } from '../theme';
+
+const NOTE_CATEGORIES = [
+  { key: 'health', label: 'Health', color: '#2ecc71' },
+  { key: 'work', label: 'Work', color: '#3498db' },
+  { key: 'play', label: 'Play', color: '#f1c40f' },
+  { key: 'love', label: 'Love', color: '#e74c3c' },
+];
 
 export default function NotesScreen() {
+  const { theme } = useTheme();
   const [notes, setNotes] = useState([]);
   const [formVisible, setFormVisible] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
@@ -37,11 +46,11 @@ export default function NotesScreen() {
     setFormVisible(true);
   };
 
-  const handleSave = async (content) => {
+  const handleSave = async ({ content, category }) => {
     if (editingNote) {
-      await updateNote(editingNote.id, content);
+      await updateNote(editingNote.id, content, category);
     } else {
-      await addNote(content);
+      await addNote(content, category);
     }
     setFormVisible(false);
     setEditingNote(null);
@@ -81,8 +90,9 @@ export default function NotesScreen() {
             <View style={styles.noteCard}>
               <TouchableOpacity style={styles.noteMain} onPress={() => openEditNote(item)} onLongPress={() => handleDelete(item)}>
                 <View style={styles.noteContent}>
+                  {item.category ? <Text style={[styles.noteCategory, { color: NOTE_CATEGORIES.find((category) => category.key === item.category)?.color ?? theme.muted }]}>{item.category}</Text> : null}
                   <Text style={styles.noteText}>{item.content}</Text>
-                  <Text style={styles.noteDate}>{formatDate(item.created_at)}</Text>
+                  <Text style={[styles.noteDate, { color: theme.muted }]}>{formatDate(item.created_at)}</Text>
                 </View>
               </TouchableOpacity>
               <TouchableOpacity style={styles.editButton} onPress={() => openEditNote(item)}>
@@ -162,15 +172,20 @@ function SwipeableNote({ children, onDelete }) {
 }
 
 function NoteFormModal({ visible, note, onClose, onSave }) {
+  const { theme } = useTheme();
   const [content, setContent] = useState('');
+  const [category, setCategory] = useState(null);
 
   useEffect(() => {
-    if (visible) setContent(note?.content || '');
+    if (visible) {
+      setContent(note?.content || '');
+      setCategory(note?.category || null);
+    }
   }, [note, visible]);
 
   const handleSubmit = () => {
     const trimmedContent = content.trim();
-    if (trimmedContent) onSave(trimmedContent);
+    if (trimmedContent) onSave({ content: trimmedContent, category });
   };
 
   return (
@@ -193,6 +208,21 @@ function NoteFormModal({ visible, note, onClose, onSave }) {
           autoFocus
           textAlignVertical="top"
         />
+        <Text style={[styles.categoryLabel, { color: theme.muted }]}>Aspect</Text>
+        <View style={styles.categoryRow}>
+          {[{ key: null, label: 'None', color: theme.muted }, ...NOTE_CATEGORIES].map((item) => (
+            <TouchableOpacity
+              key={item.key ?? 'none'}
+              style={[styles.categoryButton, { borderColor: item.color }, category === item.key && { backgroundColor: item.color }]}
+              onPress={() => setCategory(item.key)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: category === item.key }}
+              accessibilityLabel={`Tag note ${item.label}`}
+            >
+              <Text style={[styles.categoryButtonText, { color: category === item.key ? '#111318' : item.color }]}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
         <TouchableOpacity
           style={[styles.saveButton, !content.trim() && styles.disabledButton]}
           onPress={handleSubmit}
@@ -207,8 +237,9 @@ function NoteFormModal({ visible, note, onClose, onSave }) {
 
 function formatDate(sqliteDate) {
   // SQLite datetime('now') gives 'YYYY-MM-DD HH:MM:SS' in UTC
-  const d = new Date(sqliteDate.replace(' ', 'T') + 'Z');
-  return d.toLocaleString();
+  const date = new Date(sqliteDate.replace(' ', 'T') + 'Z');
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 const styles = StyleSheet.create({
@@ -228,6 +259,7 @@ const styles = StyleSheet.create({
   noteCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1c1f26', borderRadius: 10, padding: 12 },
   noteMain: { flex: 1 },
   noteContent: { flex: 1 },
+  noteCategory: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize', marginBottom: 4 },
   editButton: { paddingHorizontal: 8, paddingVertical: 6 },
   editButtonText: { color: '#9aa0a6', fontWeight: '600' },
   swipeContainer: { marginBottom: 8, overflow: 'hidden', borderRadius: 10 },
@@ -257,6 +289,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     minHeight: 160,
   },
+  categoryLabel: { fontSize: 13, fontWeight: '600', marginTop: 18, marginBottom: 8 },
+  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  categoryButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  categoryButtonText: { fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
   saveButton: {
     backgroundColor: '#6C5CE7',
     borderRadius: 12,
@@ -267,6 +303,6 @@ const styles = StyleSheet.create({
   saveButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   disabledButton: { opacity: 0.5 },
   noteText: { color: '#fff', fontSize: 15 },
-  noteDate: { color: '#666', fontSize: 11, marginTop: 6 },
+  noteDate: { fontSize: 11, marginTop: 6 },
   empty: { color: '#666', textAlign: 'center', marginTop: 40 },
 });

@@ -1,21 +1,32 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import Foundation from '@expo/vector-icons/Foundation';
+import AntDesign from '@expo/vector-icons/AntDesign';
+import Feather from '@expo/vector-icons/Feather';
+import { useTheme } from '../theme';
 
 const TABS = [
-  { key: 'reports', label: 'Dashboard' },
-  { key: 'items', label: 'Items' },
-  { key: 'settings', label: 'Settings' },
+  { key: 'reports', label: 'Dashboard', iconFamily: AntDesign, icon: 'dashboard' },
+  { key: 'astro', label: 'Astro', iconFamily: AntDesign, icon: 'moon' },
+  { key: 'items', label: 'Items', iconFamily: Foundation, icon: 'clipboard-notes' },
+  { key: 'settings', label: 'Settings', iconFamily: Feather, icon: 'settings' },
 ];
 
 export default function TabBar({ active, onChange }) {
+  const { theme } = useTheme();
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
       {TABS.map((tab) => {
         const isActive = active === tab.key;
+        const Icon = tab.iconFamily;
         return (
           <TouchableOpacity key={tab.key} style={styles.tab} onPress={() => onChange(tab.key)}>
-            <Text style={[styles.label, isActive && styles.labelActive]}>{tab.label}</Text>
-            {isActive && <View style={styles.indicator} />}
+            <Icon name={tab.icon} size={24} color={isActive ? theme.text : theme.muted} />
+            <Text style={[styles.label, { color: theme.muted }, isActive && { color: theme.text }]}>
+              {tab.label}
+            </Text>
+            {isActive && <View style={[styles.indicator, { backgroundColor: theme.accent }]} />}
           </TouchableOpacity>
         );
       })}
@@ -34,12 +45,10 @@ const styles = StyleSheet.create({
   },
   tab: { flex: 1, alignItems: 'center' },
   label: { color: '#9aa0a6', fontSize: 12, fontWeight: '600' },
-  labelActive: { color: '#fff' },
   indicator: {
     marginTop: 6,
     width: 20,
     height: 3,
     borderRadius: 2,
-    backgroundColor: '#6C5CE7',
   },
 });

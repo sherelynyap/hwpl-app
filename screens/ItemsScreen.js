@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   SectionList,
+  RefreshControl,
   TouchableOpacity,
   Alert,
   Platform,
@@ -14,17 +15,22 @@ import {
   PanResponder,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {
   addItem,
-  getAllItems,
+  getOpenItems,
   setItemStatus,
   updateItem,
   deleteItem,
   addNote,
-  getAllNotes,
+  getActiveNotes,
   updateNote,
   deleteNote,
+  setNoteArchived,
 } from '../db/database';
+import { useTheme } from '../theme';
+import CompletedItemsScreen from './CompletedItemsScreen';
+import ArchivedNotesScreen from './ArchivedNotesScreen';
 
 function toISODateString(date) {
   const y = date.getFullYear();
@@ -33,22 +39,67 @@ function toISODateString(date) {
   return `${y}-${m}-${d}`;
 }
 
+function getDaysUntilDeadline(deadline) {
+  const [year, month, day] = deadline.split('-').map(Number);
+  const deadlineDay = Date.UTC(year, month - 1, day);
+  const today = new Date();
+  const todayDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((deadlineDay - todayDay) / 86400000);
+}
+
+function getDeadlineColor(deadline, theme) {
+  const daysUntilDeadline = getDaysUntilDeadline(deadline);
+  const darkSurface = theme.key === 'dark' || theme.key === 'coral';
+
+  if (daysUntilDeadline <= 3) return theme.danger;
+  if (daysUntilDeadline <= 7) return darkSurface ? '#ffab70' : '#b45309';
+  if (daysUntilDeadline <= 14) return darkSurface ? '#f2cf62' : '#806000';
+  return theme.muted;
+}
+
+function getDeadlineLabel(deadline) {
+  const daysUntilDeadline = getDaysUntilDeadline(deadline);
+
+  if (daysUntilDeadline < 0) return 'Overdue';
+  if (daysUntilDeadline === 0) return 'Due today';
+  if (daysUntilDeadline === 1) return 'Due tmr';
+  if (daysUntilDeadline <= 7) return 'Due this week';
+  if (daysUntilDeadline <= 14) return 'Due next week';
+  return `Due ${deadline}`;
+}
+
 // This screen is remounted each time its tab becomes active (see App.js,
 // which gives every screen a `key` tied to the active tab), so a plain
 // mount-time load is enough to keep the list fresh without React Navigation.
 export default function ItemsScreen() {
+  const { theme } = useTheme();
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showCompletedItems, setShowCompletedItems] = useState(false);
+  const [showArchivedNotes, setShowArchivedNotes] = useState(false);
   const [itemFormVisible, setItemFormVisible] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [noteFormVisible, setNoteFormVisible] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
+  const [selectionType, setSelectionType] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const longPressedId = useRef(null);
 
   const load = useCallback(async () => {
-    const [itemRows, noteRows] = await Promise.all([getAllItems(), getAllNotes()]);
+    const [itemRows, noteRows] = await Promise.all([getOpenItems(), getActiveNotes()]);
     setItems(itemRows);
     setNotes(noteRows);
   }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -85,11 +136,11 @@ export default function ItemsScreen() {
     setNoteFormVisible(true);
   };
 
-  const handleSaveNote = async (content) => {
+  const handleSaveNote = async ({ content, category }) => {
     if (editingNote) {
-      await updateNote(editingNote.id, content);
+      await updateNote(editingNote.id, content, category);
     } else {
-      await addNote(content);
+      await addNote(content, category);
     }
     setNoteFormVisible(false);
     setEditingNote(null);
@@ -97,8 +148,13 @@ export default function ItemsScreen() {
   };
 
   const toggleDone = async (item) => {
-    await setItemStatus(item.id, item.status === 'open' ? 'done' : 'open');
-    load();
+    const nextStatus = item.status === 'open' ? 'done' : 'open';
+    await setItemStatus(item.id, nextStatus);
+    setItems((currentItems) =>
+      currentItems.map((currentItem) =>
+        currentItem.id === item.id ? { ...currentItem, status: nextStatus } : currentItem
+      )
+    );
   };
 
   const handleDelete = (item) => {
@@ -129,72 +185,232 @@ export default function ItemsScreen() {
     ]);
   };
 
+  const clearSelection = () => {
+    setSelectionType(null);
+    setSelectedIds([]);
+  };
+
+  const startSelection = (type, id) => {
+    longPressedId.current = { type, id };
+    setSelectionType(type);
+    setSelectedIds([id]);
+  };
+
+  const handleSelectablePress = (type, id, onRegularPress) => {
+    if (longPressedId.current?.type === type && longPressedId.current.id === id) {
+      longPressedId.current = null;
+      return;
+    }
+    if (selectionType === type) {
+      setSelectedIds((currentIds) =>
+        currentIds.includes(id) ? currentIds.filter((selectedId) => selectedId !== id) : [...currentIds, id]
+      );
+      return;
+    }
+    if (!selectionType) onRegularPress();
+  };
+
+  const confirmDeleteSelected = () => {
+    if (!selectionType || selectedIds.length === 0) return;
+    const isItemSelection = selectionType === 'items';
+    const selectedCount = selectedIds.length;
+    Alert.alert(
+      `Delete ${selectedCount} ${isItemSelection ? 'item' : 'note'}${selectedCount === 1 ? '' : 's'}?`,
+      'This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const deleteRecord = isItemSelection ? deleteItem : deleteNote;
+            await Promise.all(selectedIds.map((id) => deleteRecord(id)));
+            if (isItemSelection) {
+              setItems((currentItems) => currentItems.filter((item) => !selectedIds.includes(item.id)));
+            } else {
+              setNotes((currentNotes) => currentNotes.filter((note) => !selectedIds.includes(note.id)));
+            }
+            clearSelection();
+          },
+        },
+      ]
+    );
+  };
+
+  const archiveSelectedNotes = async () => {
+    if (selectionType !== 'notes' || selectedIds.length === 0) return;
+    await Promise.all(selectedIds.map((id) => setNoteArchived(id, true)));
+    setNotes((currentNotes) => currentNotes.filter((note) => !selectedIds.includes(note.id)));
+    clearSelection();
+  };
+
+  if (showCompletedItems) {
+    return <CompletedItemsScreen onBack={() => setShowCompletedItems(false)} />;
+  }
+  if (showArchivedNotes) {
+    return <ArchivedNotesScreen onBack={() => setShowArchivedNotes(false)} />;
+  }
+
   const sections = [
-    { key: 'items', title: 'Outstanding items', data: items },
+    {
+      key: 'items',
+      title: 'Outstanding items',
+      data: items,
+    },
     { key: 'notes', title: 'Notes', data: notes },
   ];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}> 
       <SectionList
         sections={sections}
         keyExtractor={(item, index) => `${item.id}-${index}`}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={theme.accent}
+            colors={[theme.accent]}
+          />
+        }
         stickySectionHeadersEnabled={false}
         renderSectionHeader={({ section }) => (
           <View style={[styles.sectionHeader, section.key === 'notes' && styles.notesSectionHeader]}>
-            <Text style={styles.title}>{section.title}</Text>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={section.key === 'items' ? openNewItem : openNewNote}
-              accessibilityLabel={`Add ${section.key === 'items' ? 'item' : 'note'}`}
-            >
-              <Text style={styles.addIconText}>+</Text>
-            </TouchableOpacity>
+            <Text style={[styles.title, { color: theme.text }]}>{section.title}</Text>
+            <View style={styles.headerActions}>
+              {selectionType === section.key ? (
+                <>
+                  {selectionType === 'notes' && (
+                    <TouchableOpacity
+                      style={[styles.addButton, { backgroundColor: theme.surface }, !selectedIds.length && styles.disabledButton]}
+                      onPress={archiveSelectedNotes}
+                      disabled={!selectedIds.length}
+                      accessibilityRole="button"
+                      accessibilityLabel="Archive selected notes"
+                    >
+                      <MaterialCommunityIcons name="archive-arrow-down-outline" size={21} color={theme.text} />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={[styles.addButton, { backgroundColor: theme.dangerButton }, !selectedIds.length && styles.disabledButton]}
+                    onPress={confirmDeleteSelected}
+                    disabled={!selectedIds.length}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete selected"
+                  >
+                    <MaterialCommunityIcons name="delete-outline" size={21} color={theme.dangerButtonText} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addButton, { backgroundColor: theme.surface }]}
+                    onPress={clearSelection}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel selection"
+                  >
+                    <MaterialCommunityIcons name="close" size={21} color={theme.text} />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  {section.key === 'items' && (
+                    <TouchableOpacity
+                      style={[styles.addButton, { backgroundColor: theme.surface }]}
+                      onPress={() => setShowCompletedItems(true)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Show completed item history"
+                    >
+                      <MaterialCommunityIcons name="history" size={21} color={theme.text} />
+                    </TouchableOpacity>
+                  )}
+                  {section.key === 'notes' && (
+                    <TouchableOpacity
+                      style={[styles.addButton, { backgroundColor: theme.surface }]}
+                      onPress={() => setShowArchivedNotes(true)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Show archived notes"
+                    >
+                      <MaterialCommunityIcons name="archive-outline" size={21} color={theme.text} />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={[styles.addButton, { backgroundColor: theme.primaryButton }]}
+                    onPress={section.key === 'items' ? openNewItem : openNewNote}
+                    accessibilityLabel={`Add ${section.key === 'items' ? 'item' : 'note'}`}
+                  >
+                    <Text style={[styles.addIconText, { color: theme.primaryButtonText }]}>+</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
           </View>
         )}
         renderItem={({ item, section }) =>
           section.key === 'items' ? (
             <SwipeableItem onDelete={() => handleDelete(item)}>
-              <View style={styles.row}>
-                <TouchableOpacity style={styles.itemMain} onPress={() => toggleDone(item)} onLongPress={() => handleDelete(item)}>
-                  <View style={styles.checkbox}>
-                    {item.status === 'done' && <Text style={styles.checkmark}>{'\u2713'}</Text>}
+              <View style={[styles.row, { backgroundColor: theme.surface }, selectionType === 'items' && selectedIds.includes(item.id) && { borderColor: theme.accent, borderWidth: 1 }]}> 
+                <TouchableOpacity
+                  style={styles.itemMain}
+                  onPress={() => handleSelectablePress('items', item.id, () => toggleDone(item))}
+                  onLongPress={() => startSelection('items', item.id)}
+                  delayLongPress={350}
+                >
+                  <View style={[styles.checkbox, selectionType === 'items' && { borderColor: theme.accent, backgroundColor: selectedIds.includes(item.id) ? theme.accent : 'transparent' }]}>
+                    {selectionType === 'items' ? (
+                      selectedIds.includes(item.id) && <MaterialCommunityIcons name="check" size={15} color={theme.primaryButtonText} />
+                    ) : item.status === 'done' ? (
+                      <Text style={styles.checkmark}>{'\u2713'}</Text>
+                    ) : null}
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text
                       style={[
                         styles.itemTitle,
+                        { color: theme.text },
                         item.status === 'done' && { textDecorationLine: 'line-through', color: '#666' },
                       ]}
                     >
                       {item.title}
                     </Text>
-                    {item.deadline ? <Text style={styles.itemDeadline}>Due {item.deadline}</Text> : null}
+                    {item.deadline ? <Text style={[styles.itemDeadline, { color: getDeadlineColor(item.deadline, theme) }]}>{getDeadlineLabel(item.deadline)}</Text> : null}
                   </View>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.editButton} onPress={() => openEditItem(item)}>
-                  <Text style={styles.editButtonText}>Edit</Text>
-                </TouchableOpacity>
+                {selectionType !== 'items' && (
+                  <TouchableOpacity style={styles.editButton} onPress={() => openEditItem(item)}>
+                    <Text style={[styles.editButtonText, { color: theme.muted }]}>Edit</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </SwipeableItem>
           ) : (
             <SwipeableItem onDelete={() => handleDeleteNote(item)}>
-              <View style={styles.noteCard}>
-                <TouchableOpacity style={styles.noteMain} onPress={() => openEditNote(item)} onLongPress={() => handleDeleteNote(item)}>
-                  <Text style={styles.noteText}>{item.content}</Text>
+              <View style={[styles.noteCard, { backgroundColor: theme.surface }, selectionType === 'notes' && selectedIds.includes(item.id) && { borderColor: theme.accent, borderWidth: 1 }]}> 
+                {selectionType === 'notes' && (
+                  <View style={[styles.checkbox, styles.noteSelectionCheckbox, { borderColor: theme.accent, backgroundColor: selectedIds.includes(item.id) ? theme.accent : 'transparent' }]}> 
+                    {selectedIds.includes(item.id) && <MaterialCommunityIcons name="check" size={15} color={theme.primaryButtonText} />}
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={styles.noteMain}
+                  onPress={() => handleSelectablePress('notes', item.id, () => openEditNote(item))}
+                  onLongPress={() => startSelection('notes', item.id)}
+                  delayLongPress={350}
+                >
+                  {item.category ? <Text style={[styles.noteCategory, { color: ({ health: '#2ecc71', work: '#3498db', play: '#f1c40f', love: '#e74c3c' })[item.category] ?? theme.muted }]}>{item.category}</Text> : null}
+                  <Text style={[styles.noteText, { color: theme.text }]}>{item.content}</Text>
                   <Text style={styles.noteDate}>{formatDate(item.created_at)}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.editButton} onPress={() => openEditNote(item)}>
-                  <Text style={styles.editButtonText}>Edit</Text>
-                </TouchableOpacity>
+                {selectionType !== 'notes' && (
+                  <TouchableOpacity style={styles.editButton} onPress={() => openEditNote(item)}>
+                    <Text style={[styles.editButtonText, { color: theme.muted }]}>Edit</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </SwipeableItem>
           )
         }
         renderSectionFooter={({ section }) =>
           section.data.length === 0 ? (
-            <Text style={styles.empty}>{section.key === 'items' ? 'Nothing here yet.' : 'No notes yet.'}</Text>
+            <Text style={[styles.empty, { color: theme.muted }]}>{section.key === 'items' ? 'Nothing here yet.' : 'No notes yet.'}</Text>
           ) : null
         }
       />
@@ -221,6 +437,7 @@ export default function ItemsScreen() {
 }
 
 function SwipeableItem({ children, onDelete }) {
+  const { theme } = useTheme();
   const translateX = useRef(new Animated.Value(0)).current;
   const panResponder = useRef(
     PanResponder.create({
@@ -257,6 +474,7 @@ function SwipeableItem({ children, onDelete }) {
         style={[
           styles.deleteAction,
           {
+            backgroundColor: theme.dangerButton,
             opacity: translateX.interpolate({
               inputRange: [-90, -45, 0],
               outputRange: [1, 0, 0],
@@ -266,7 +484,7 @@ function SwipeableItem({ children, onDelete }) {
         ]}
       >
         <TouchableOpacity style={styles.deleteActionButton} onPress={onDelete}>
-        <Text style={styles.deleteActionText}>Delete</Text>
+        <Text style={[styles.deleteActionText, { color: theme.dangerButtonText }]}>Delete</Text>
         </TouchableOpacity>
       </Animated.View>
       <Animated.View style={[styles.swipeContent, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
@@ -277,29 +495,34 @@ function SwipeableItem({ children, onDelete }) {
 }
 
 function NoteFormModal({ visible, note, onClose, onSave }) {
+  const { theme } = useTheme();
   const [content, setContent] = useState('');
+  const [category, setCategory] = useState(null);
 
   useEffect(() => {
-    if (visible) setContent(note?.content || '');
+    if (visible) {
+      setContent(note?.content || '');
+      setCategory(note?.category || null);
+    }
   }, [note, visible]);
 
   const handleSubmit = () => {
     const trimmedContent = content.trim();
-    if (trimmedContent) onSave(trimmedContent);
+    if (trimmedContent) onSave({ content: trimmedContent, category });
   };
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.formContainer}>
+      <View style={[styles.formContainer, { backgroundColor: theme.background }]}> 
         <View style={styles.formHeader}>
           <TouchableOpacity onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={[styles.cancelText, { color: theme.muted }]}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={styles.formTitle}>{note ? 'Edit note' : 'New note'}</Text>
+          <Text style={[styles.formTitle, { color: theme.text }]}>{note ? 'Edit note' : 'New note'}</Text>
           <View style={styles.headerSpacer} />
         </View>
         <TextInput
-          style={styles.formInput}
+          style={[styles.formInput, { backgroundColor: theme.surface, color: theme.text }]}
           placeholder="Write a note..."
           placeholderTextColor="#888"
           value={content}
@@ -308,12 +531,33 @@ function NoteFormModal({ visible, note, onClose, onSave }) {
           autoFocus
           textAlignVertical="top"
         />
+        <Text style={[styles.categoryLabel, { color: theme.muted }]}>Aspect</Text>
+        <View style={styles.categoryRow}>
+          {[
+            { key: null, label: 'None', color: theme.muted },
+            { key: 'health', label: 'Health', color: '#2ecc71' },
+            { key: 'work', label: 'Work', color: '#3498db' },
+            { key: 'play', label: 'Play', color: '#f1c40f' },
+            { key: 'love', label: 'Love', color: '#e74c3c' },
+          ].map((item) => (
+            <TouchableOpacity
+              key={item.key ?? 'none'}
+              style={[styles.categoryButton, { borderColor: item.color }, category === item.key && { backgroundColor: item.color }]}
+              onPress={() => setCategory(item.key)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: category === item.key }}
+              accessibilityLabel={`Tag note ${item.label}`}
+            >
+              <Text style={[styles.categoryButtonText, { color: category === item.key ? theme.background : item.color }]}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
         <TouchableOpacity
-          style={[styles.saveButton, !content.trim() && styles.disabledButton]}
+          style={[styles.saveButton, { backgroundColor: theme.primaryButton }, !content.trim() && styles.disabledButton]}
           onPress={handleSubmit}
           disabled={!content.trim()}
         >
-          <Text style={styles.saveButtonText}>{note ? 'Save changes' : 'Save note'}</Text>
+          <Text style={[styles.saveButtonText, { color: theme.primaryButtonText }]}>{note ? 'Save changes' : 'Save note'}</Text>
         </TouchableOpacity>
       </View>
     </Modal>
@@ -321,6 +565,7 @@ function NoteFormModal({ visible, note, onClose, onSave }) {
 }
 
 function ItemFormModal({ visible, item, onClose, onSave }) {
+  const { theme } = useTheme();
   const [title, setTitle] = useState('');
   const [deadlineDate, setDeadlineDate] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -348,27 +593,27 @@ function ItemFormModal({ visible, item, onClose, onSave }) {
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.formContainer}>
+      <View style={[styles.formContainer, { backgroundColor: theme.background }]}> 
         <View style={styles.formHeader}>
           <TouchableOpacity onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={[styles.cancelText, { color: theme.muted }]}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={styles.formTitle}>{item ? 'Edit item' : 'New item'}</Text>
+          <Text style={[styles.formTitle, { color: theme.text }]}>{item ? 'Edit item' : 'New item'}</Text>
           <View style={styles.headerSpacer} />
         </View>
-        <Text style={styles.formLabel}>Item</Text>
+        <Text style={[styles.formLabel, { color: theme.text }]}>Item</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.surface, color: theme.text }]}
           placeholder="What needs doing?"
           placeholderTextColor="#888"
           value={title}
           onChangeText={setTitle}
           autoFocus={!item}
         />
-        <Text style={styles.formLabel}>Deadline</Text>
+        <Text style={[styles.formLabel, { color: theme.text }]}>Deadline</Text>
         <View style={styles.deadlineRow}>
-          <TouchableOpacity style={[styles.input, styles.dateButton]} onPress={() => setShowPicker(true)}>
-            <Text style={deadlineDate ? styles.dateButtonText : styles.dateButtonPlaceholder}>
+          <TouchableOpacity style={[styles.input, styles.dateButton, { backgroundColor: theme.surface }]} onPress={() => setShowPicker(true)}>
+            <Text style={deadlineDate ? [styles.dateButtonText, { color: theme.text }] : styles.dateButtonPlaceholder}>
               {deadlineDate ? toISODateString(deadlineDate) : 'No deadline'}
             </Text>
           </TouchableOpacity>
@@ -378,8 +623,8 @@ function ItemFormModal({ visible, item, onClose, onSave }) {
             </TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity style={[styles.saveButton, !title.trim() && styles.disabledButton]} onPress={handleSubmit} disabled={!title.trim()}>
-          <Text style={styles.addButtonText}>{item ? 'Save changes' : 'Create item'}</Text>
+        <TouchableOpacity style={[styles.saveButton, { backgroundColor: theme.primaryButton }, !title.trim() && styles.disabledButton]} onPress={handleSubmit} disabled={!title.trim()}>
+          <Text style={[styles.addButtonText, { color: theme.primaryButtonText }]}>{item ? 'Save changes' : 'Create item'}</Text>
         </TouchableOpacity>
 
         {showPicker && Platform.OS === 'ios' ? (
@@ -394,6 +639,9 @@ function ItemFormModal({ visible, item, onClose, onSave }) {
                   minimumDate={new Date()}
                   onChange={handlePickerChange}
                 />
+                <TouchableOpacity style={[styles.pickerDoneButton, { backgroundColor: theme.primaryButton }]} onPress={() => setShowPicker(false)}>
+                  <Text style={[styles.pickerDoneText, { color: theme.primaryButtonText }]}>Done</Text>
+                </TouchableOpacity>
               </Pressable>
             </Pressable>
           </Modal>
@@ -413,13 +661,15 @@ function ItemFormModal({ visible, item, onClose, onSave }) {
 
 function formatDate(sqliteDate) {
   const date = new Date(sqliteDate.replace(' ', 'T') + 'Z');
-  return date.toLocaleString();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111318', padding: 20 },
   listContent: { paddingBottom: 40 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, marginTop: 4 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   notesSectionHeader: { marginTop: 24 },
   title: { fontSize: 26, lineHeight: 32, fontWeight: '700', color: '#fff' },
   input: {
@@ -430,15 +680,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   addButton: {
-    backgroundColor: '#6C5CE7',
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     height: 32,
     width: 32,
   },
-  addButtonText: { color: '#fff', fontWeight: '700' },
-  addIconText: { color: '#fff', fontSize: 24, lineHeight: 28, fontWeight: '500' },
+  addButtonText: { fontWeight: '700' },
+  addIconText: { fontSize: 24, lineHeight: 28, fontWeight: '500' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -455,18 +704,19 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     width: 90,
-    backgroundColor: '#e74c3c',
     alignItems: 'center',
     justifyContent: 'center',
   },
   deleteActionButton: { alignItems: 'center', justifyContent: 'center', padding: 12 },
-  deleteActionText: { color: '#fff', fontWeight: '700' },
+  deleteActionText: { fontWeight: '700' },
   itemMain: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   noteCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1c1f26', borderRadius: 10, padding: 12 },
   noteMain: { flex: 1 },
   noteText: { color: '#fff', fontSize: 15 },
+  noteCategory: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize', marginBottom: 4 },
   noteDate: { color: '#666', fontSize: 11, marginTop: 6 },
   editButton: { paddingHorizontal: 8, paddingVertical: 6 },
+  noteArchiveButton: { padding: 6 },
   editButtonText: { color: '#9aa0a6', fontWeight: '600' },
   checkbox: {
     width: 22,
@@ -478,6 +728,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  noteSelectionCheckbox: { marginLeft: 0 },
   checkmark: { color: '#2ecc71', fontWeight: '700' },
   itemTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   itemDeadline: { color: '#9aa0a6', fontSize: 12, marginTop: 2 },
@@ -502,15 +753,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     minHeight: 160,
   },
+  categoryLabel: { fontSize: 13, fontWeight: '600', marginTop: 18, marginBottom: 8 },
+  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  categoryButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  categoryButtonText: { fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
   saveButton: {
-    backgroundColor: '#6C5CE7',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 28,
   },
   disabledButton: { opacity: 0.5 },
-  saveButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  saveButtonText: { fontWeight: '700', fontSize: 16 },
   pickerBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
@@ -519,4 +773,6 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   pickerCard: { backgroundColor: '#fff', borderRadius: 14, padding: 8 },
+  pickerDoneButton: { borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginTop: 8 },
+  pickerDoneText: { fontWeight: '700' },
 });

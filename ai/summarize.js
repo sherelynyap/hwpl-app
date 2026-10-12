@@ -5,18 +5,21 @@
 // Set this to your deployed endpoint once you have one running.
 const SUMMARY_ENDPOINT = 'https://hwpl-backend.vercel.app/api/summarize';
 
-export async function generateAISummary(report, period) {
+export async function generateAISummary(report, period, taggedNotes = []) {
   const payload = {
     period, // 'week' | 'month'
     categories: Object.fromEntries(
-      Object.entries(report).map(([cat, data]) => [
-        cat,
-        {
+      Object.entries(report).map(([category, data]) => {
+        const ratingNotes = data.entries.map((entry) => entry.note).filter(Boolean);
+        const notesForCategory = taggedNotes
+          .filter((note) => note.category === category)
+          .map((note) => note.content);
+        return [category, {
           average: data.average,
           count: data.count,
-          notes: data.entries.map((e) => e.note).filter(Boolean),
-        },
-      ])
+          notes: [...ratingNotes, ...notesForCategory],
+        }];
+      })
     ),
   };
 

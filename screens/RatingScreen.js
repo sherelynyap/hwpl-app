@@ -1,7 +1,20 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  KeyboardAvoidingView,
+  Keyboard,
+  Platform,
+  ScrollView,
+  Alert,
+} from 'react-native';
 import { addRating } from '../db/database';
 import LinearRatingSlider from '../components/LinearRatingSlider';
+import { useTheme } from '../theme';
 
 const CATEGORIES = [
   { key: 'health', label: 'Health', color: '#2ecc71' },
@@ -10,10 +23,12 @@ const CATEGORIES = [
   { key: 'love', label: 'Love', color: '#e74c3c' },
 ];
 
-export default function RatingScreen({ onSaved }) {
+export default function RatingScreen({ onSaved, onContentHeightChange }) {
+  const { theme } = useTheme();
   const [scores, setScores] = useState({ health: 0, work: 0, play: 0, love: 0 });
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(1);
 
   const setScore = (cat, val) => setScores((prev) => ({ ...prev, [cat]: val }));
 
@@ -25,6 +40,7 @@ export default function RatingScreen({ onSaved }) {
       }
       setScores({ health: 0, work: 0, play: 0, love: 0 });
       setNote('');
+      setPage(1);
       await onSaved?.();
     } catch (e) {
       Alert.alert('Error', 'Could not save ratings: ' + e.message);
@@ -34,49 +50,78 @@ export default function RatingScreen({ onSaved }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>How was today?</Text>
-      <Text style={styles.subtitle}>Rate each area from 0 to 5</Text>
-
-      {CATEGORIES.map((cat) => (
-        <LinearRatingSlider
-          key={cat.key}
-          value={scores[cat.key]}
-          onChange={(v) => setScore(cat.key, v)}
-          color={cat.color}
-          label={cat.label}
-        />
-      ))}
-
-      <Text style={styles.label}>Optional note</Text>
-      <TextInput
-        style={styles.noteInput}
-        placeholder="Anything that stood out today..."
-        placeholderTextColor="#888"
-        value={note}
-        onChangeText={setNote}
-        multiline
-      />
-
-      <TouchableOpacity
-        style={[styles.saveButton, saving && { opacity: 0.6 }]}
-        onPress={handleSave}
-        disabled={saving}
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <KeyboardAvoidingView
+        style={[styles.container, { backgroundColor: theme.background }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save'}</Text>
-      </TouchableOpacity>
-    </View>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={(_, contentHeight) => onContentHeightChange?.(contentHeight)}
+        >
+          {page === 1 ? (
+            <>
+              <Text style={[styles.title, { color: theme.text }]}>How was today?</Text>
+              <Text style={[styles.subtitle, { color: theme.muted }]}>Rate each area from 0 to 5</Text>
+
+              {CATEGORIES.map((cat) => (
+                <LinearRatingSlider
+                  key={cat.key}
+                  value={scores[cat.key]}
+                  onChange={(v) => setScore(cat.key, v)}
+                  color={cat.color}
+                  label={cat.label}
+                />
+              ))}
+
+              <TouchableOpacity
+                style={[styles.saveButton, styles.nextPageButton, { backgroundColor: theme.primaryButton }]}
+                onPress={() => setPage(2)}
+              >
+                <Text style={[styles.saveButtonText, { color: theme.primaryButtonText }]}>Next</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.title, { color: theme.text }]}>Anything else?</Text>
+              <Text style={[styles.subtitle, { color: theme.muted }]}>Add an optional note about today.</Text>
+
+              <TextInput
+                style={[styles.noteInput, { backgroundColor: theme.surface, color: theme.text }]}
+                placeholder="Anything that stood out today..."
+                placeholderTextColor="#888"
+                value={note}
+                onChangeText={setNote}
+                multiline
+              />
+
+              <View style={styles.buttonRow}>
+                <TouchableOpacity style={[styles.backButton, { borderColor: theme.border }]} onPress={() => setPage(1)}>
+                  <Text style={[styles.backButtonText, { color: theme.text }]}>Back</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveButton, styles.nextButton, { backgroundColor: theme.primaryButton }, saving && { opacity: 0.6 }]}
+                  onPress={handleSave}
+                  disabled={saving}
+                >
+                  <Text style={[styles.saveButtonText, { color: theme.primaryButtonText }]}>{saving ? 'Saving...' : 'Save'}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111318', padding: 20, paddingTop: 28 },
-  title: { fontSize: 26, fontWeight: '700', color: '#fff', marginBottom: 4 },
-  subtitle: { fontSize: 14, color: '#9aa0a6', marginBottom: 12 },
-  label: { fontSize: 16, fontWeight: '600', color: '#fff', marginBottom: 8 },
+  container: { flex: 1 },
+  content: { padding: 20, paddingTop: 28 },
+  title: { fontSize: 26, fontWeight: '700', marginBottom: 4 },
+  subtitle: { fontSize: 14, marginBottom: 12 },
   noteInput: {
-    backgroundColor: '#1c1f26',
-    color: '#fff',
     borderRadius: 10,
     padding: 12,
     minHeight: 52,
@@ -84,10 +129,21 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   saveButton: {
-    backgroundColor: '#6C5CE7',
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  saveButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  nextPageButton: { marginTop: 10 },
+  saveButtonText: { fontWeight: '700', fontSize: 16 },
+  buttonRow: { flexDirection: 'row', gap: 12 },
+  backButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#3a3f4a',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  backButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  nextButton: { flex: 1 },
 });

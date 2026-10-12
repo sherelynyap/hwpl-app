@@ -8,7 +8,8 @@ SQLite database — no backend required to run it.
 - **Daily rating popup** — rate Health / Work / Play / Love from 0 to 5 with
   optional note, stored in local SQLite.
 - **Items tab** — add outstanding items with an optional deadline
-  (`YYYY-MM-DD`), tap to mark done, and manage notes in a separate section.
+  (`YYYY-MM-DD`), tap to mark done, and manage notes tagged by Health, Work,
+  Play, or Love in a separate section.
 - **Reports tab** — weekly/monthly average per category with a simple
   bar chart, plus an optional "Generate AI summary" button.
 - **Notifications** — a daily reminder to log your ratings, and a
@@ -38,8 +39,9 @@ extract. Instead update `SUMMARY_ENDPOINT` in `ai/summarize.js` to point at your
 deployed URL.
 
 Once that's live, tapping "Generate AI summary" on the Reports tab
-sends that period's averages + any notes you attached to ratings, and
-gets back a short reflective summary.
+sends that period's averages, notes attached to ratings, and active notes
+tagged by Health, Work, Play, or Love in the matching category, then gets
+back a short reflective summary.
 
 ## Where to take it next
 
