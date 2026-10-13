@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   KeyboardAvoidingView,
@@ -14,7 +12,7 @@ import {
 } from 'react-native';
 import { addRating } from '../db/database';
 import LinearRatingSlider from '../components/LinearRatingSlider';
-import { useTheme } from '../theme';
+import { AppText as Text, AppTextInput as TextInput, useTheme } from '../theme';
 
 const CATEGORIES = [
   { key: 'health', label: 'Health', color: '#2ecc71' },

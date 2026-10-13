@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, useWindowDimensions, Modal, TextInput, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, useWindowDimensions, Modal, Alert } from 'react-native';
 import { buildReport, getRatedDaysInMonth, getRatingsForDay, getTaggedNotesInRange, updateRatingsForDay } from '../db/database';
 import { generateAISummary } from '../ai/summarize';
 import RatingDial from '../components/RatingDial';
 import LinearRatingSlider from '../components/LinearRatingSlider';
-import { useTheme } from '../theme';
+import { AppText as Text, AppTextInput as TextInput, useTheme } from '../theme';
 import MarkdownText from '../components/MarkdownText';
 import Octicons from '@expo/vector-icons/Octicons';
 

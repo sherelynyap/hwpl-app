@@ -1,10 +1,10 @@
 import React, { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, Platform, Modal, Pressable, FlatList } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, Modal, Pressable, FlatList } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { GetCountries } from 'react-country-state-city';
 import { saveBirthChart, getBirthChart } from '../db/database';
 import { computeNatalChart } from '../astrology/chart';
-import { useTheme } from '../theme';
+import { AppText as Text, AppTextInput as TextInput, useTheme } from '../theme';
 
 function toISODate(date) {
   const y = date.getFullYear();

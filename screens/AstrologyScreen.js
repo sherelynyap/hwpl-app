@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
 import Svg, { Circle, G, Path } from 'react-native-svg';
 import { getBirthChart, getCachedMonthlyTheme, saveMonthlyTheme } from '../db/database';
-import { computeCurrentTransits, computeMoonPhase, nextMoonQuarters, computeRetrogrades } from '../astrology/chart';
+import { computeCurrentTransits, computeWeeklyTransitChanges, computeMoonPhase, nextMoonQuarters, computeRetrogrades } from '../astrology/chart';
 import { generateMonthlyTheme } from '../ai/monthlyTheme';
-import { useTheme } from '../theme';
+import { AppText as Text, useTheme } from '../theme';
 import BirthChartScreen from './BirthChartScreen';
 import MarkdownText from '../components/MarkdownText';
 
@@ -43,6 +43,7 @@ export default function AstrologyScreen() {
   const monthKey = monthKeyFor(now);
   const transits = computeCurrentTransits(now);
   const todayMoonSign = transits.moonSign;
+  const weeklyChanges = computeWeeklyTransitChanges(now);
   const moonPhase = computeMoonPhase(now);
   const moonQuarters = nextMoonQuarters(now);
   const retrogrades = computeRetrogrades(now).filter((r) => r.retrograde);
@@ -144,6 +145,21 @@ export default function AstrologyScreen() {
           </View>
 
           {moonCard(todayMoonSign, theme)}
+          <Text style={[styles.sectionHeading, { color: theme.text }]}>This week's shifts</Text>
+          {weeklyChanges.length === 0 ? (
+            <Text style={[styles.noChangeText, { color: theme.muted }]}>No sign changes in the next 7 days.</Text>
+          ) : (
+            <View style={[styles.weeklyList, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              {weeklyChanges.map((c) => (
+                <View key={c.body} style={styles.weeklyRow}>
+                  <Text style={{ color: theme.muted }}>{PLANET_LABELS[c.body] || c.body}</Text>
+                  <Text style={[styles.weeklyShift, { color: theme.text }]}>
+                    {c.fromSign} {'\u2192'} {c.toSign}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
           <Text style={[styles.sectionHeading, { color: theme.text }]}>This month's transits</Text>
           <View style={styles.signRow}>
             <SignBadge label="Sun" value={transits.sunSign} />
@@ -294,4 +310,8 @@ const styles = StyleSheet.create({
   },
   todayLabel: { fontSize: 12, marginBottom: 4 },
   todaySign: { fontSize: 22, fontWeight: '800' },
+  noChangeText: { fontSize: 13, marginBottom: 20 },
+  weeklyList: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 20 },
+  weeklyRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
+  weeklyShift: { fontWeight: '600' },
 });

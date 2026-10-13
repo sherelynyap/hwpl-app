@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { getArchivedNotes, setNoteArchived } from '../db/database';
-import { useTheme } from '../theme';
+import { AppText as Text, useTheme } from '../theme';
 
 export default function ArchivedNotesScreen({ onBack }) {
   const { theme } = useTheme();

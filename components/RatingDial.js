@@ -1,7 +1,7 @@
 import React, { useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, PanResponder } from 'react-native';
+import { View,  StyleSheet, PanResponder } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useTheme } from '../theme';
+import { AppText as Text, useTheme } from '../theme';
 
 const START_ANGLE = -135; // value = 0
 const END_ANGLE = 135;    // value = 5

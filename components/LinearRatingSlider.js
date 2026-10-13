@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { useTheme } from '../theme';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { AppText as Text, useTheme } from '../theme';
 
 export default function LinearRatingSlider({ value, onChange, color = '#6C5CE7', label }) {
   const { theme } = useTheme();

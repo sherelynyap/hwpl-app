@@ -46,6 +46,24 @@ export function computeCurrentTransits(date = new Date()) {
   }
   return result;
 }
+// Compares transits now vs. 7 days out and returns only the bodies whose
+// sign actually changes within that window — most planets won't move far
+// enough to flip signs in a week, so this is usually a short list (often
+// just the Moon, sometimes nothing at all).
+export function computeWeeklyTransitChanges(startDate = new Date()) {
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 7);
+
+  const changes = [];
+  for (const [key, body] of NATAL_BODIES) {
+    const fromSign = signForLongitude(eclipticLongitudeOf(body, startDate));
+    const toSign = signForLongitude(eclipticLongitudeOf(body, endDate));
+    if (fromSign !== toSign) {
+      changes.push({ body: key, fromSign, toSign });
+    }
+  }
+  return changes;
+}
 const MOON_PHASE_NAMES = [
   [15, 'New Moon'], [90, 'Waxing Crescent'], [105, 'First Quarter'],
   [180, 'Waxing Gibbous'], [195, 'Full Moon'], [270, 'Waning Gibbous'],

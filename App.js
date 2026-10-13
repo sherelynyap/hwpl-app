@@ -5,8 +5,6 @@ import {
   ActivityIndicator,
   Modal,
   TouchableOpacity,
-  Text,
-  TextInput,
   Alert,
   Platform,
   AppState,
@@ -34,12 +32,19 @@ import ItemsScreen from './screens/ItemsScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import AstrologyScreen from './screens/AstrologyScreen';
 import SettingsScreen from './screens/SettingsScreen';
-import { THEMES, ThemeProvider, useTheme } from './theme';
+import {
+  AppText as Text,
+  AppTextInput as TextInput,
+  isFontKey,
+  THEMES,
+  ThemeProvider,
+  useTheme,
+} from './theme';
 
 const USER_NAME_STORAGE_KEY = 'hwpl-user-name';
 
 function AppContent() {
-  const { theme, themeKey } = useTheme();
+  const { theme, themeKey, getFontFamily } = useTheme();
   const welcomeWave = React.useRef(new Animated.Value(0)).current;
   const [ready, setReady] = useState(false);
   const [activeTab, setActiveTab] = useState('reports');
@@ -76,14 +81,21 @@ function AppContent() {
       const todayRatings = await getTodayRatings();
       const needsRating = todayRatings.length === 0;
       setShouldPromptRating(needsRating);
-      const storedName = await AsyncStorage.getItem(USER_NAME_STORAGE_KEY);
-      const storedTheme = await AsyncStorage.getItem('hwpl-theme');
+      const [storedNameEntry, storedThemeEntry, storedFontEntry] = await AsyncStorage.multiGet([
+        USER_NAME_STORAGE_KEY,
+        'hwpl-theme',
+        'hwpl-font',
+      ]);
+      const storedName = storedNameEntry[1];
+      const storedTheme = storedThemeEntry[1];
+      const storedFont = storedFontEntry[1];
       if (storedName?.trim()) setUserName(storedName.trim());
       else setUsernamePromptVisible(true);
       try {
         await ensureWeeklyBackup({
           userName: storedName?.trim() ?? '',
           themeKey: THEMES[storedTheme] ? storedTheme : 'dark',
+          fontKey: isFontKey(storedFont) ? storedFont : 'system',
         });
       } catch (error) {
         console.warn('Automatic backup failed:', error.message);
@@ -111,13 +123,15 @@ function AppContent() {
     if (!ready) return undefined;
     const checkBackup = async () => {
       try {
-        const [storedName, storedTheme] = await AsyncStorage.multiGet([
+        const [storedName, storedTheme, storedFont] = await AsyncStorage.multiGet([
           USER_NAME_STORAGE_KEY,
           'hwpl-theme',
+          'hwpl-font',
         ]);
         await ensureWeeklyBackup({
           userName: storedName[1]?.trim() ?? '',
           themeKey: THEMES[storedTheme[1]] ? storedTheme[1] : 'dark',
+          fontKey: isFontKey(storedFont[1]) ? storedFont[1] : 'system',
         });
       } catch (error) {
         console.warn('Automatic backup failed:', error.message);
@@ -242,7 +256,7 @@ function AppContent() {
               <Animated.Text
                 style={[
                   styles.welcomeText,
-                  { color: theme.text },
+                  { color: theme.text, fontFamily: getFontFamily('700') },
                   {
                     transform: [
                       { translateX: welcomeWave.interpolate({ inputRange: [-1, 1], outputRange: [-8, 8] }) },

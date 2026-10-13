@@ -3,22 +3,22 @@ import Markdown from 'react-native-markdown-display';
 import { useTheme } from '../theme';
 
 export default function MarkdownText({ children, color }) {
-  const { theme } = useTheme();
+  const { theme, getFontFamily } = useTheme();
   const accentColor = color || theme.accentText;
 
   return (
-    <Markdown style={markdownStyles(theme, accentColor)}>
+    <Markdown style={markdownStyles(theme, accentColor, getFontFamily)}>
       {children}
     </Markdown>
   );
 }
 
-const markdownStyles = (theme, accentColor) => ({
-  body: { color: theme.text, fontSize: 15, lineHeight: 21 },
-  heading1: { color: theme.text, fontSize: 20, fontWeight: '700', marginTop: 8, marginBottom: 6 },
-  heading2: { color: theme.text, fontSize: 18, fontWeight: '700', marginTop: 8, marginBottom: 6 },
-  heading3: { color: accentColor, fontSize: 16, fontWeight: '700', marginTop: 6, marginBottom: 4 },
-  strong: { color: theme.text, fontWeight: '700' },
+const markdownStyles = (theme, accentColor, getFontFamily) => ({
+  body: { color: theme.text, fontSize: 15, lineHeight: 21, fontFamily: getFontFamily('400') },
+  heading1: { color: theme.text, fontSize: 20, fontWeight: '700', marginTop: 8, marginBottom: 6, fontFamily: getFontFamily('700') },
+  heading2: { color: theme.text, fontSize: 18, fontWeight: '700', marginTop: 8, marginBottom: 6, fontFamily: getFontFamily('700') },
+  heading3: { color: accentColor, fontSize: 16, fontWeight: '700', marginTop: 6, marginBottom: 4, fontFamily: getFontFamily('700') },
+  strong: { color: theme.text, fontWeight: '700', fontFamily: getFontFamily('700') },
   em: { color: theme.muted, fontStyle: 'italic' },
   bullet_list: { marginVertical: 4 },
   ordered_list: { marginVertical: 4 },

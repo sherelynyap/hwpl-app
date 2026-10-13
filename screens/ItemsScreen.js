@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   SectionList,
   RefreshControl,
@@ -10,7 +9,6 @@ import {
   Platform,
   Modal,
   Pressable,
-  TextInput,
   Animated,
   PanResponder,
   KeyboardAvoidingView,
@@ -32,7 +30,7 @@ import {
   deleteNote,
   setNoteArchived,
 } from '../db/database';
-import { useTheme } from '../theme';
+import { AppText as Text, AppTextInput as TextInput, useTheme } from '../theme';
 import CompletedItemsScreen from './CompletedItemsScreen';
 import ArchivedNotesScreen from './ArchivedNotesScreen';
 

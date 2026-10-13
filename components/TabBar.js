@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import Foundation from '@expo/vector-icons/Foundation';
 import AntDesign from '@expo/vector-icons/AntDesign';
 import Feather from '@expo/vector-icons/Feather';
-import { useTheme } from '../theme';
+import { AppText as Text, useTheme } from '../theme';
 
 const TABS = [
   { key: 'reports', label: 'Dashboard', iconFamily: AntDesign, icon: 'dashboard' },
@@ -22,10 +22,7 @@ export default function TabBar({ active, onChange }) {
         const Icon = tab.iconFamily;
         return (
           <TouchableOpacity key={tab.key} style={styles.tab} onPress={() => onChange(tab.key)}>
-            <Icon name={tab.icon} size={24} color={isActive ? theme.text : theme.muted} />
-            <Text style={[styles.label, { color: theme.muted }, isActive && { color: theme.text }]}>
-              {tab.label}
-            </Text>
+            <Icon name={tab.icon} size={28} color={isActive ? theme.text : theme.muted} />
             {isActive && <View style={[styles.indicator, { backgroundColor: theme.accent }]} />}
           </TouchableOpacity>
         );
@@ -40,8 +37,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#1c1f26',
     borderTopWidth: 1,
     borderTopColor: '#2a2e38',
-    paddingBottom: 20,
-    paddingTop: 10,
+    paddingBottom: 24,
+    paddingTop: 14,
   },
   tab: { flex: 1, alignItems: 'center' },
   label: { color: '#9aa0a6', fontSize: 12, fontWeight: '600' },

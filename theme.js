@@ -1,7 +1,86 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { StyleSheet, Text as NativeText, TextInput as NativeTextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFonts } from 'expo-font';
+import Quicksand_400Regular from '@expo-google-fonts/quicksand/400Regular/Quicksand_400Regular.ttf';
+import Quicksand_500Medium from '@expo-google-fonts/quicksand/500Medium/Quicksand_500Medium.ttf';
+import Quicksand_600SemiBold from '@expo-google-fonts/quicksand/600SemiBold/Quicksand_600SemiBold.ttf';
+import Quicksand_700Bold from '@expo-google-fonts/quicksand/700Bold/Quicksand_700Bold.ttf';
+import Nunito_400Regular from '@expo-google-fonts/nunito/400Regular/Nunito_400Regular.ttf';
+import Nunito_500Medium from '@expo-google-fonts/nunito/500Medium/Nunito_500Medium.ttf';
+import Nunito_600SemiBold from '@expo-google-fonts/nunito/600SemiBold/Nunito_600SemiBold.ttf';
+import Nunito_700Bold from '@expo-google-fonts/nunito/700Bold/Nunito_700Bold.ttf';
+import Baloo2_400Regular from '@expo-google-fonts/baloo-2/400Regular/Baloo2_400Regular.ttf';
+import Baloo2_500Medium from '@expo-google-fonts/baloo-2/500Medium/Baloo2_500Medium.ttf';
+import Baloo2_600SemiBold from '@expo-google-fonts/baloo-2/600SemiBold/Baloo2_600SemiBold.ttf';
+import Baloo2_700Bold from '@expo-google-fonts/baloo-2/700Bold/Baloo2_700Bold.ttf';
 
 const THEME_STORAGE_KEY = 'hwpl-theme';
+const FONT_STORAGE_KEY = 'hwpl-font';
+
+export const FONT_OPTIONS = {
+  system: { key: 'system', label: 'Default', fontFamily: null },
+  quicksand: {
+    key: 'quicksand',
+    label: 'Quicksand',
+    fontFamily: 'Quicksand_400Regular',
+    fontFamilies: {
+      400: 'Quicksand_400Regular',
+      500: 'Quicksand_500Medium',
+      600: 'Quicksand_600SemiBold',
+      700: 'Quicksand_700Bold',
+    },
+  },
+  nunito: {
+    key: 'nunito',
+    label: 'Nunito',
+    fontFamily: 'Nunito_400Regular',
+    fontFamilies: {
+      400: 'Nunito_400Regular',
+      500: 'Nunito_500Medium',
+      600: 'Nunito_600SemiBold',
+      700: 'Nunito_700Bold',
+    },
+  },
+  baloo2: {
+    key: 'baloo2',
+    label: 'Baloo 2',
+    fontFamily: 'Baloo2_400Regular',
+    fontFamilies: {
+      400: 'Baloo2_400Regular',
+      500: 'Baloo2_500Medium',
+      600: 'Baloo2_600SemiBold',
+      700: 'Baloo2_700Bold',
+    },
+  },
+};
+
+const FONT_ASSETS = {
+  Quicksand_400Regular,
+  Quicksand_500Medium,
+  Quicksand_600SemiBold,
+  Quicksand_700Bold,
+  Nunito_400Regular,
+  Nunito_500Medium,
+  Nunito_600SemiBold,
+  Nunito_700Bold,
+  Baloo2_400Regular,
+  Baloo2_500Medium,
+  Baloo2_600SemiBold,
+  Baloo2_700Bold,
+};
+
+function getFontFamilyForWeight(fontKey, fontWeight = '400') {
+  const option = FONT_OPTIONS[fontKey];
+  if (!option?.fontFamilies) return option?.fontFamily ?? null;
+  const normalizedWeight = fontWeight === 'bold' ? 700 : Number(fontWeight) || 400;
+  const weight = normalizedWeight >= 700 ? 700 : normalizedWeight >= 600 ? 600 : normalizedWeight >= 500 ? 500 : 400;
+  return option.fontFamilies[weight];
+}
+
+export function isFontKey(fontKey) {
+  return Object.prototype.hasOwnProperty.call(FONT_OPTIONS, fontKey);
+}
 
 export const THEMES = {
   dark: {
@@ -95,14 +174,23 @@ const ThemeContext = createContext({
   theme: THEMES.dark,
   themeKey: 'dark',
   setThemeKey: () => {},
+  fontKey: 'system',
+  fontFamily: null,
+  getFontFamily: () => null,
+  setFontKey: () => {},
 });
 
 export function ThemeProvider({ children }) {
   const [themeKey, setThemeKeyState] = useState('dark');
+  const [fontKey, setFontKeyState] = useState('system');
+  const [fontsLoaded] = useFonts(FONT_ASSETS);
 
   useEffect(() => {
     AsyncStorage.getItem(THEME_STORAGE_KEY).then((storedKey) => {
       if (storedKey && THEMES[storedKey]) setThemeKeyState(storedKey);
+    });
+    AsyncStorage.getItem(FONT_STORAGE_KEY).then((storedKey) => {
+      if (isFontKey(storedKey)) setFontKeyState(storedKey);
     });
   }, []);
 
@@ -112,8 +200,26 @@ export function ThemeProvider({ children }) {
     await AsyncStorage.setItem(THEME_STORAGE_KEY, nextKey);
   };
 
+  const setFontKey = async (nextKey) => {
+    if (!isFontKey(nextKey)) return;
+    setFontKeyState(nextKey);
+    await AsyncStorage.setItem(FONT_STORAGE_KEY, nextKey);
+  };
+  const getFontFamily = (fontWeight) =>
+    fontsLoaded ? getFontFamilyForWeight(fontKey, fontWeight) : null;
+
   return (
-    <ThemeContext.Provider value={{ theme: THEMES[themeKey], themeKey, setThemeKey }}>
+    <ThemeContext.Provider
+      value={{
+        theme: THEMES[themeKey],
+        themeKey,
+        setThemeKey,
+        fontKey,
+        fontFamily: getFontFamily('400'),
+        getFontFamily,
+        setFontKey,
+      }}
+    >
       {children}
     </ThemeContext.Provider>
   );
@@ -121,4 +227,18 @@ export function ThemeProvider({ children }) {
 
 export function useTheme() {
   return useContext(ThemeContext);
+}
+
+export function AppText({ style, ...props }) {
+  const { getFontFamily } = useTheme();
+  const fontWeight = StyleSheet.flatten(style)?.fontWeight;
+  const fontFamily = getFontFamily(fontWeight);
+  return <NativeText {...props} style={[fontFamily ? { fontFamily } : null, style]} />;
+}
+
+export function AppTextInput({ style, ...props }) {
+  const { getFontFamily } = useTheme();
+  const fontWeight = StyleSheet.flatten(style)?.fontWeight;
+  const fontFamily = getFontFamily(fontWeight);
+  return <NativeTextInput {...props} style={[fontFamily ? { fontFamily } : null, style]} />;
 }
