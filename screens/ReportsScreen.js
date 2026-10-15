@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, useWindowDimensions, Modal, Alert } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, Image, View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, useWindowDimensions, Modal, Alert } from 'react-native';
 import { buildReport, getRatedDaysInMonth, getRatingsForDay, getTaggedNotesInRange, updateRatingsForDay } from '../db/database';
 import { generateAISummary } from '../ai/summarize';
 import RatingDial from '../components/RatingDial';
 import LinearRatingSlider from '../components/LinearRatingSlider';
 import { AppText as Text, AppTextInput as TextInput, useTheme } from '../theme';
 import MarkdownText from '../components/MarkdownText';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Octicons from '@expo/vector-icons/Octicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const CATEGORY_META = {
   health: { label: 'Health', color: '#2ecc71' },
@@ -21,10 +23,45 @@ const getMonthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 
 
 const getDateKey = (date) => `${getMonthKey(date)}-${String(date.getDate()).padStart(2, '0')}`;
 
+function DashboardAvatar({ size }) {
+  const [frame, setFrame] = useState(0);
+  const bob = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const interval = setInterval(() => setFrame((current) => (current + 1) % 9), 140);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bob, { toValue: -3, duration: 650, useNativeDriver: true }),
+        Animated.timing(bob, { toValue: 0, duration: 650, useNativeDriver: true }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [bob]);
+
+  return (
+    <View style={[styles.avatarViewport, { width: size, height: size * 25 / 24 }]} accessible accessibilityLabel="Animated pixel-art companion">
+      <Animated.Image
+        source={require('../assets/avatar-idle.png')}
+        resizeMode="stretch"
+        style={[styles.avatarSprite, { width: size * 9, height: size * 25 / 24, left: -frame * size, transform: [{ translateY: bob }] }]}
+      />
+    </View>
+  );
+}
+
 export default function ReportsScreen() {
   const { theme } = useTheme();
-  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
   const dialSize = Math.max(52, Math.min(82, Math.floor((width - 40) / 4) - 8));
+  const avatarSize = Math.min(144, (width - 40) / 2);
+  const avatarHeight = avatarSize * 25 / 24;
+  const sceneHeight = Math.max(avatarHeight + dialSize * 2 + 24, height - insets.top - 264);
   const [period, setPeriod] = useState('week'); // 'week' | 'month'
   const [report, setReport] = useState(null);
   const [aiSummary, setAiSummary] = useState(null);
@@ -34,6 +71,7 @@ export default function ReportsScreen() {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
+  const [calendarVisible, setCalendarVisible] = useState(false);
   const [ratedDays, setRatedDays] = useState([]);
   const [loadingCalendar, setLoadingCalendar] = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -149,24 +187,34 @@ export default function ReportsScreen() {
     <>
     <ScrollView
       style={[styles.container, { backgroundColor: theme.background }]}
-      contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
+      contentContainerStyle={{ padding: 20, paddingBottom: 20 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.accent} />}
     >
       <View style={styles.titleRow}>
         <Text style={[styles.title, { color: theme.text }]}>Dashboard</Text>
-        <TouchableOpacity
-          style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
-          onPress={handleGenerateSummary}
-          disabled={loadingAI}
-          accessibilityRole="button"
-          accessibilityLabel="Generate AI summary"
-        >
-          {loadingAI ? (
-            <ActivityIndicator color={theme.primaryButtonText} />
-          ) : (
-            <Octicons name="sparkles-fill" size={24} color={theme.primaryButtonText} />
-          )}
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
+            onPress={() => setCalendarVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Open calendar"
+          >
+            <MaterialIcons name="calendar-month" size={24} color={theme.primaryButtonText} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
+            onPress={handleGenerateSummary}
+            disabled={loadingAI}
+            accessibilityRole="button"
+            accessibilityLabel="Generate AI summary"
+          >
+            {loadingAI ? (
+              <ActivityIndicator color={theme.primaryButtonText} />
+            ) : (
+              <Octicons name="sparkles-fill" size={24} color={theme.primaryButtonText} />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.toggleRow}>
@@ -186,7 +234,8 @@ export default function ReportsScreen() {
 
       {report && (
         <View style={styles.dialGrid}>
-          {Object.entries(report).map(([cat, data]) => {
+          {['health', 'work', 'play', 'love'].map((cat) => {
+            const data = report[cat];
             const meta = CATEGORY_META[cat];
             const isLowest = lowestAverage !== null && data.average === lowestAverage;
             return (
@@ -212,78 +261,115 @@ export default function ReportsScreen() {
           })}
         </View>
       )}
-
-      <View style={[styles.calendar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <View style={styles.calendarHeader}>
-          <TouchableOpacity
-            style={styles.monthArrow}
-            onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}
-            accessibilityRole="button"
-            accessibilityLabel="Previous month"
-          >
-            <Text style={[styles.monthArrowText, { color: theme.text }]}>{'\u2039'}</Text>
-          </TouchableOpacity>
-          <Text style={[styles.monthTitle, { color: theme.text }]}>
-            {calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-          </Text>
-          <TouchableOpacity
-            style={[styles.monthArrow, isCurrentMonth && styles.disabledArrow]}
-            onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}
-            disabled={isCurrentMonth}
-            accessibilityRole="button"
-            accessibilityLabel="Next month"
-          >
-            <Text style={[styles.monthArrowText, { color: isCurrentMonth ? theme.muted : theme.text }]}>{'\u203a'}</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.calendarGrid}>
-          {WEEKDAYS.map((weekday) => (
-            <Text key={weekday} style={[styles.weekday, { color: theme.muted }]}>{weekday}</Text>
-          ))}
-          {calendarCells.map((day, index) => {
-            const dateKey = day ? getDateKey(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day)) : null;
-            const wasRated = dateKey && ratedDays.includes(dateKey);
-            const canEditDay = dateKey && dateKey <= getDateKey(today);
-            const isToday = dateKey === getDateKey(today);
-            return (
-              <TouchableOpacity
-                key={day ?? `empty-${index}`}
-                style={styles.dayCell}
-                onPress={() => canEditDay && handleSelectDay(dateKey)}
-                disabled={!canEditDay || loadingDay}
-                accessibilityRole={canEditDay ? 'button' : undefined}
-                accessibilityLabel={canEditDay ? `${wasRated ? 'Edit rating' : 'Add missed rating'} for ${dateKey}` : undefined}
-              >
-                {day ? (
-                  <View
-                    style={[
-                      styles.dayNumber,
-                      wasRated && { backgroundColor: theme.accent },
-                      isToday && { borderColor: theme.primaryButton, borderWidth: 2 },
-                    ]}
-                    accessible
-                    accessibilityLabel={`${calendarMonth.toLocaleDateString(undefined, { month: 'long' })} ${day}${wasRated ? ', rating saved' : ''}${isToday ? ', today' : ''}`}
-                  >
-                    <Text style={[styles.dayText, { color: wasRated ? '#293326' : theme.text }]}>{day}</Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-        <View style={styles.calendarLegend}>
-          {loadingCalendar ? (
-            <ActivityIndicator size="small" color={theme.accent} />
-          ) : (
-            <>
-              <View style={[styles.legendSwatch, { backgroundColor: theme.accent }]} />
-              <Text style={[styles.legendText, { color: theme.muted }]}>Saved · tap any past date to add or edit</Text>
-            </>
-          )}
+      <View style={[styles.avatarContainer, { height: sceneHeight - dialSize }]}>
+        <Image
+          source={require('../assets/pixel_sky_grass_bg.png')}
+          resizeMode="stretch"
+          style={styles.sceneBackdrop}
+          pointerEvents="none"
+        />
+        <View style={[styles.avatarPosition, { top: (sceneHeight - dialSize - avatarHeight) / 2 }]}>
+          <DashboardAvatar size={avatarSize} />
         </View>
       </View>
 
     </ScrollView>
+    <Modal
+      visible={calendarVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setCalendarVisible(false)}
+    >
+      <View style={styles.calendarModalOverlay}>
+        <View style={[styles.calendarModal, { backgroundColor: theme.background, borderColor: theme.border }]}>
+          <View style={styles.calendarModalHeader}>
+            <Text style={[styles.dayModalTitle, { color: theme.text }]}>Calendar</Text>
+            <TouchableOpacity
+              style={styles.dayModalClose}
+              onPress={() => setCalendarVisible(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close calendar"
+            >
+              <Octicons name="x" size={20} color={theme.text} />
+            </TouchableOpacity>
+          </View>
+          <View style={[styles.calendar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={styles.calendarHeader}>
+              <TouchableOpacity
+                style={styles.monthArrow}
+                onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}
+                accessibilityRole="button"
+                accessibilityLabel="Previous month"
+              >
+                <Text style={[styles.monthArrowText, { color: theme.text }]}>{'\u2039'}</Text>
+              </TouchableOpacity>
+              <Text style={[styles.monthTitle, { color: theme.text }]}>
+                {calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+              </Text>
+              <TouchableOpacity
+                style={[styles.monthArrow, isCurrentMonth && styles.disabledArrow]}
+                onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}
+                disabled={isCurrentMonth}
+                accessibilityRole="button"
+                accessibilityLabel="Next month"
+              >
+                <Text style={[styles.monthArrowText, { color: isCurrentMonth ? theme.muted : theme.text }]}>{'\u203a'}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.calendarGrid}>
+              {WEEKDAYS.map((weekday) => (
+                <Text key={weekday} style={[styles.weekday, { color: theme.muted }]}>{weekday}</Text>
+              ))}
+              {calendarCells.map((day, index) => {
+                const dateKey = day ? getDateKey(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day)) : null;
+                const wasRated = dateKey && ratedDays.includes(dateKey);
+                const canEditDay = dateKey && dateKey <= getDateKey(today);
+                const isToday = dateKey === getDateKey(today);
+                return (
+                  <TouchableOpacity
+                    key={day ?? `empty-${index}`}
+                    style={styles.dayCell}
+                    onPress={() => {
+                      if (canEditDay) {
+                        setCalendarVisible(false);
+                        handleSelectDay(dateKey);
+                      }
+                    }}
+                    disabled={!canEditDay || loadingDay}
+                    accessibilityRole={canEditDay ? 'button' : undefined}
+                    accessibilityLabel={canEditDay ? `${wasRated ? 'Edit rating' : 'Add missed rating'} for ${dateKey}` : undefined}
+                  >
+                    {day ? (
+                      <View
+                        style={[
+                          styles.dayNumber,
+                          wasRated && { backgroundColor: theme.accent },
+                          isToday && { borderColor: theme.primaryButton, borderWidth: 2 },
+                        ]}
+                        accessible
+                        accessibilityLabel={`${calendarMonth.toLocaleDateString(undefined, { month: 'long' })} ${day}${wasRated ? ', rating saved' : ''}${isToday ? ', today' : ''}`}
+                      >
+                        <Text style={[styles.dayText, { color: wasRated ? '#293326' : theme.text }]}>{day}</Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.calendarLegend}>
+              {loadingCalendar ? (
+                <ActivityIndicator size="small" color={theme.accent} />
+              ) : (
+                <>
+                  <View style={[styles.legendSwatch, { backgroundColor: theme.accent }]} />
+                  <Text style={[styles.legendText, { color: theme.muted }]}>Saved · tap any past date to add or edit</Text>
+                </>
+              )}
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
     <Modal
       visible={Boolean(aiSummary)}
       transparent
@@ -402,7 +488,18 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111318' },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   title: { fontSize: 26, fontWeight: '700', color: '#fff' },
+  headerActions: { flexDirection: 'row', gap: 8 },
+  avatarContainer: { position: 'relative', width: '100%', alignItems: 'center', marginTop: 8, marginBottom: 20, overflow: 'hidden', borderWidth: 3, borderColor: '#557c70' },
+  sceneBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%', zIndex: 0 },
+  avatarPosition: { position: 'absolute', alignSelf: 'center', zIndex: 1 },
+  avatarViewport: { overflow: 'hidden' },
+  avatarSprite: { position: 'absolute', top: 0 },
+  dialGrid: { zIndex: 2, flexDirection: 'row', width: '100%' },
+  dialItem: { flex: 1, alignItems: 'center' },
   calendar: { borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 20 },
+  calendarModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)', justifyContent: 'center', padding: 20 },
+  calendarModal: { borderWidth: 1, borderRadius: 10, padding: 18 },
+  calendarModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   calendarHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   monthArrow: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   disabledArrow: { opacity: 0.45 },
@@ -427,8 +524,6 @@ const styles = StyleSheet.create({
   toggleButtonActive: { backgroundColor: '#6C5CE7' },
   toggleText: { color: '#9aa0a6', fontWeight: '600' },
   toggleTextActive: { color: '#fff' },
-  dialGrid: { flexDirection: 'row', flexWrap: 'nowrap' },
-  dialItem: { width: '25%', alignItems: 'center', marginBottom: 20 },
   dimmedDial: { opacity: 0.45 },
   aiButton: {
     width: 44,
