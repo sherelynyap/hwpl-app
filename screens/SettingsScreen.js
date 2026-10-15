@@ -378,7 +378,7 @@ export default function SettingsScreen({ onReset }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111318', padding: 20 },
+  container: { flex: 1, backgroundColor: '#111318', padding: 20, paddingTop: 12 },
   content: { flexGrow: 1 },
   title: { color: '#fff', fontSize: 26, fontWeight: '700', marginBottom: 16 },
   subtitle: { color: '#9aa0a6', fontSize: 14, marginBottom: 28 },

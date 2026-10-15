@@ -266,9 +266,9 @@ function SignBadge({ label, value }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 20, paddingTop: 16 },
+  header: { paddingHorizontal: 20, paddingTop: 8 },
   pageContent: { flex: 1 },
-  pagePadding: { padding: 20, paddingBottom: 60 },
+  pagePadding: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 60 },
   pageTabs: { flexDirection: 'row', borderWidth: 1, borderRadius: 10, padding: 3, marginBottom: 12 },
   pageTab: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 7 },
   pageTabText: { fontSize: 13, fontWeight: '600' },

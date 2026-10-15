@@ -187,7 +187,7 @@ export default function ReportsScreen() {
     <>
     <ScrollView
       style={[styles.container, { backgroundColor: theme.background }]}
-      contentContainerStyle={{ padding: 20, paddingBottom: 20 }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.accent} />}
     >
       <View style={styles.titleRow}>
@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   title: { fontSize: 26, fontWeight: '700', color: '#fff' },
   headerActions: { flexDirection: 'row', gap: 8 },
-  avatarContainer: { position: 'relative', width: '100%', alignItems: 'center', marginTop: 8, marginBottom: 20, overflow: 'hidden', borderWidth: 3, borderColor: '#557c70' },
+  avatarContainer: { position: 'relative', width: '100%', alignItems: 'center', marginTop: 0, marginBottom: 20, overflow: 'hidden', borderWidth: 3, borderColor: '#557c70' },
   sceneBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%', zIndex: 0 },
   avatarPosition: { position: 'absolute', alignSelf: 'center', zIndex: 1 },
   avatarViewport: { overflow: 'hidden' },

@@ -559,7 +559,7 @@ function NoteFormModal({ visible, note, onClose, onSave }) {
               <TouchableOpacity onPress={onClose}>
                 <Text style={[styles.cancelText, { color: theme.muted }]}>Cancel</Text>
               </TouchableOpacity>
-              <Text style={[styles.formTitle, { color: theme.text }]}>{note ? 'Edit note' : 'New note'}</Text>
+              <Text style={[styles.formTitle, { color: theme.text }]} pointerEvents="none">{note ? 'Edit note' : 'New note'}</Text>
               <TouchableOpacity
                 style={[styles.saveIconButton, { backgroundColor: theme.accent }, !content.trim() && styles.disabledButton]}
                 onPress={handleSubmit}
@@ -663,8 +663,17 @@ function ItemFormModal({ visible, item, onClose, onSave }) {
           <TouchableOpacity onPress={onClose}>
             <Text style={[styles.cancelText, { color: theme.muted }]}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={[styles.formTitle, { color: theme.text }]}>{item ? 'Edit item' : 'New item'}</Text>
-          <View style={styles.headerSpacer} />
+          <Text style={[styles.formTitle, { color: theme.text }]} pointerEvents="none">{item ? 'Edit item' : 'New item'}</Text>
+          <TouchableOpacity
+            style={[styles.saveIconButton, { backgroundColor: theme.accent }, !title.trim() && styles.disabledButton]}
+            onPress={handleSubmit}
+            disabled={!title.trim()}
+            accessibilityRole="button"
+            accessibilityLabel={item ? 'Save changes' : 'Create item'}
+            accessibilityState={{ disabled: !title.trim() }}
+          >
+            <MaterialCommunityIcons name="check" size={24} color={theme.primaryButtonText} />
+          </TouchableOpacity>
         </View>
         <Text style={[styles.formLabel, { color: theme.text }]}>Item</Text>
         <TextInput
@@ -688,10 +697,6 @@ function ItemFormModal({ visible, item, onClose, onSave }) {
             </TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity style={[styles.saveButton, { backgroundColor: theme.primaryButton }, !title.trim() && styles.disabledButton]} onPress={handleSubmit} disabled={!title.trim()}>
-          <Text style={[styles.addButtonText, { color: theme.primaryButtonText }]}>{item ? 'Save changes' : 'Create item'}</Text>
-        </TouchableOpacity>
-
         {showPicker && Platform.OS === 'ios' ? (
           <Modal transparent animationType="fade" visible onRequestClose={() => setShowPicker(false)}>
             <Pressable style={styles.pickerBackdrop} onPress={() => setShowPicker(false)}>
@@ -704,7 +709,13 @@ function ItemFormModal({ visible, item, onClose, onSave }) {
                   minimumDate={new Date()}
                   onChange={handlePickerChange}
                 />
-                <TouchableOpacity style={[styles.pickerDoneButton, { backgroundColor: theme.primaryButton }]} onPress={() => setShowPicker(false)}>
+                <TouchableOpacity
+                  style={[styles.pickerDoneButton, { backgroundColor: theme.primaryButton }]}
+                  onPress={() => {
+                    setDeadlineDate((currentDate) => currentDate || new Date());
+                    setShowPicker(false);
+                  }}
+                >
                   <Text style={[styles.pickerDoneText, { color: theme.primaryButtonText }]}>Done</Text>
                 </TouchableOpacity>
               </Pressable>
@@ -731,7 +742,7 @@ function formatDate(sqliteDate) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111318', padding: 20 },
+  container: { flex: 1, backgroundColor: '#111318', padding: 20, paddingTop: 12 },
   listContent: { paddingBottom: 40 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, marginTop: 4 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -815,8 +826,9 @@ const styles = StyleSheet.create({
   formKeyboardAvoiding: { flex: 1 },
   formScrollContent: { flexGrow: 1 },
   formContainer: { flex: 1, backgroundColor: '#111318', padding: 20, paddingTop: 60 },
-  formHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 },
-  formTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
+  formHeader: { position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 },
+  formTitle: { position: 'absolute', left: 40, right: 40, textAlign: 'center', color: '#fff', fontSize: 20, fontWeight: '700' },
+  headerSpacer: { width: 40, height: 40 },
   cancelText: { color: '#9aa0a6', fontSize: 16 },
   saveIconButton: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   formLabel: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 8, marginTop: 12 },
