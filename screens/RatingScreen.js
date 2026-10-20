@@ -10,8 +10,9 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
-import { addRating } from '../db/database';
+import { addRating, recordDailyRatingProgress } from '../db/database';
 import LinearRatingSlider from '../components/LinearRatingSlider';
+import RewardModal from '../components/RewardModal';
 import { AppText as Text, AppTextInput as TextInput, useTheme } from '../theme';
 
 const CATEGORIES = [
@@ -21,12 +22,14 @@ const CATEGORIES = [
   { key: 'love', label: 'Love', color: '#e74c3c' },
 ];
 
-export default function RatingScreen({ onSaved, onContentHeightChange }) {
+export default function RatingScreen({ onSaved, onCharacterProgressChanged, onContentHeightChange }) {
   const { theme } = useTheme();
   const [scores, setScores] = useState({ health: 0, work: 0, play: 0, love: 0 });
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [page, setPage] = useState(1);
+  const [rewardMessages, setRewardMessages] = useState([]);
+  const [saveAfterReward, setSaveAfterReward] = useState(false);
 
   const setScore = (cat, val) => setScores((prev) => ({ ...prev, [cat]: val }));
 
@@ -36,10 +39,20 @@ export default function RatingScreen({ onSaved, onContentHeightChange }) {
       for (const c of CATEGORIES) {
         await addRating(c.key, scores[c.key], note || null);
       }
+      const { unlockedCharacters, earnedGachaPull } = await recordDailyRatingProgress();
+      onCharacterProgressChanged?.();
       setScores({ health: 0, work: 0, play: 0, love: 0 });
       setNote('');
       setPage(1);
-      await onSaved?.();
+      const rewards = [];
+      if (unlockedCharacters.includes('leafhead')) rewards.push('Leafhead is now yours!');
+      if (earnedGachaPull) rewards.push('You earned a gacha pull for logging ratings on 7 days!');
+      if (rewards.length > 0) {
+        setRewardMessages(rewards);
+        setSaveAfterReward(true);
+      } else {
+        await onSaved?.();
+      }
     } catch (e) {
       Alert.alert('Error', 'Could not save ratings: ' + e.message);
     } finally {
@@ -47,70 +60,84 @@ export default function RatingScreen({ onSaved, onContentHeightChange }) {
     }
   };
 
+  const closeRewards = async () => {
+    setRewardMessages([]);
+    if (!saveAfterReward) return;
+    setSaveAfterReward(false);
+    try {
+      await onSaved?.();
+    } catch (error) {
+      Alert.alert('Could not finish saving', error.message);
+    }
+  };
+
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <KeyboardAvoidingView
-        style={[styles.container, { backgroundColor: theme.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          onContentSizeChange={(_, contentHeight) => onContentHeightChange?.(contentHeight)}
+    <>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <KeyboardAvoidingView
+          style={[styles.container, { backgroundColor: theme.background }]}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          {page === 1 ? (
-            <>
-              <Text style={[styles.title, { color: theme.text }]}>How was today?</Text>
-              <Text style={[styles.subtitle, { color: theme.muted }]}>Rate each area from 0 to 5</Text>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            onContentSizeChange={(_, contentHeight) => onContentHeightChange?.(contentHeight)}
+          >
+            {page === 1 ? (
+              <>
+                <Text style={[styles.title, { color: theme.text }]}>How was today?</Text>
+                <Text style={[styles.subtitle, { color: theme.muted }]}>Rate each area from 0 to 5</Text>
 
-              {CATEGORIES.map((cat) => (
-                <LinearRatingSlider
-                  key={cat.key}
-                  value={scores[cat.key]}
-                  onChange={(v) => setScore(cat.key, v)}
-                  color={cat.color}
-                  label={cat.label}
-                />
-              ))}
+                {CATEGORIES.map((cat) => (
+                  <LinearRatingSlider
+                    key={cat.key}
+                    value={scores[cat.key]}
+                    onChange={(v) => setScore(cat.key, v)}
+                    color={cat.color}
+                    label={cat.label}
+                  />
+                ))}
 
-              <TouchableOpacity
-                style={[styles.saveButton, styles.nextPageButton, { backgroundColor: theme.primaryButton }]}
-                onPress={() => setPage(2)}
-              >
-                <Text style={[styles.saveButtonText, { color: theme.primaryButtonText }]}>Next</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <Text style={[styles.title, { color: theme.text }]}>Anything else?</Text>
-              <Text style={[styles.subtitle, { color: theme.muted }]}>Add an optional note about today.</Text>
-
-              <TextInput
-                style={[styles.noteInput, { backgroundColor: theme.surface, color: theme.text }]}
-                placeholder="Anything that stood out today..."
-                placeholderTextColor="#888"
-                value={note}
-                onChangeText={setNote}
-                multiline
-              />
-
-              <View style={styles.buttonRow}>
-                <TouchableOpacity style={[styles.backButton, { borderColor: theme.border }]} onPress={() => setPage(1)}>
-                  <Text style={[styles.backButtonText, { color: theme.text }]}>Back</Text>
-                </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.saveButton, styles.nextButton, { backgroundColor: theme.primaryButton }, saving && { opacity: 0.6 }]}
-                  onPress={handleSave}
-                  disabled={saving}
+                  style={[styles.saveButton, styles.nextPageButton, { backgroundColor: theme.primaryButton }]}
+                  onPress={() => setPage(2)}
                 >
-                  <Text style={[styles.saveButtonText, { color: theme.primaryButtonText }]}>{saving ? 'Saving...' : 'Save'}</Text>
+                  <Text style={[styles.saveButtonText, { color: theme.primaryButtonText }]}>Next</Text>
                 </TouchableOpacity>
-              </View>
-            </>
-          )}
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </TouchableWithoutFeedback>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.title, { color: theme.text }]}>Anything else?</Text>
+                <Text style={[styles.subtitle, { color: theme.muted }]}>Add an optional note about today.</Text>
+
+                <TextInput
+                  style={[styles.noteInput, { backgroundColor: theme.surface, color: theme.text }]}
+                  placeholder="Anything that stood out today..."
+                  placeholderTextColor="#888"
+                  value={note}
+                  onChangeText={setNote}
+                  multiline
+                />
+
+                <View style={styles.buttonRow}>
+                  <TouchableOpacity style={[styles.backButton, { borderColor: theme.border }]} onPress={() => setPage(1)}>
+                    <Text style={[styles.backButtonText, { color: theme.text }]}>Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.saveButton, styles.nextButton, { backgroundColor: theme.primaryButton }, saving && { opacity: 0.6 }]}
+                    onPress={handleSave}
+                    disabled={saving}
+                  >
+                    <Text style={[styles.saveButtonText, { color: theme.primaryButtonText }]}>{saving ? 'Saving...' : 'Save'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
+      <RewardModal rewards={rewardMessages} onClose={closeRewards} />
+    </>
   );
 }
 

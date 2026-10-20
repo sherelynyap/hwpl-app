@@ -55,6 +55,8 @@ function AppContent() {
   const [nameInput, setNameInput] = useState('');
   const [userName, setUserName] = useState('');
   const [ratingModalHeight, setRatingModalHeight] = useState('75%');
+  const [characterProgressVersion, setCharacterProgressVersion] = useState(0);
+  const refreshCharacterProgress = () => setCharacterProgressVersion((version) => version + 1);
 
   const handleSaveUserName = async () => {
     const trimmedName = nameInput.trim();
@@ -192,10 +194,10 @@ function AppContent() {
             every switch, so its data reloads without needing React
             Navigation's focus-effect hooks. */}
         <View style={{ flex: 1 }}>
-          {activeTab === 'rating' && <RatingScreen key="rating" />}
+          {activeTab === 'rating' && <RatingScreen key="rating" onCharacterProgressChanged={refreshCharacterProgress} />}
           {activeTab === 'astro' && <AstrologyScreen key="astro" />}
           {activeTab === 'items' && <ItemsScreen key="items" />}
-          {activeTab === 'reports' && <ReportsScreen key="reports" />}
+          {activeTab === 'reports' && <ReportsScreen key="reports" characterProgressVersion={characterProgressVersion} />}
           {activeTab === 'settings' && (
             <SettingsScreen
               key="settings"
@@ -286,6 +288,7 @@ function AppContent() {
                 <Text style={styles.ratingModalCloseText}>x</Text>
               </TouchableOpacity>
               <RatingScreen
+                onCharacterProgressChanged={refreshCharacterProgress}
                 onContentHeightChange={(contentHeight) => {
                   const maxHeight = Dimensions.get('window').height * 0.75;
                   setRatingModalHeight(Math.min(contentHeight, maxHeight));

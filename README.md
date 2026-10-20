@@ -12,6 +12,7 @@ SQLite database — no backend required to run it.
   Health, Work, Play, or Love.
 - **Reports dashboard** — weekly/monthly averages per category, a month-view
   rating calendar, and an optional "Generate AI summary" button.
+  - character collection: start as Basic, unlock and switch to Leafhead after logging ratings on any 3 days, then earn a random character pull for every 7 days rated (characters from the snowhex Pixel Plains asset pack: https://snowhex.itch.io/pixel-plains)
 - **Astrology tab** — set up a birth chart, review the current moon / transits,
   and generate a monthly theme based on your chart plus the sky for the month.
 - **Personalization + backup** — save your preferred name, theme, and font, then

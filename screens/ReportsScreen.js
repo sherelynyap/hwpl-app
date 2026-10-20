@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Image, View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, useWindowDimensions, Modal, Alert } from 'react-native';
-import { buildReport, getRatedDaysInMonth, getRatingsForDay, getTaggedNotesInRange, updateRatingsForDay } from '../db/database';
+import { Animated, Easing, Image, View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, useWindowDimensions, Modal, Alert } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { buildReport, drawCharacter, getCharacterProgress, getRatedDaysInMonth, getRatingsForDay, getTaggedNotesInRange, recordHistoricalRatingProgress, setActiveCharacter, updateRatingsForDay } from '../db/database';
 import { generateAISummary } from '../ai/summarize';
 import RatingDial from '../components/RatingDial';
 import LinearRatingSlider from '../components/LinearRatingSlider';
@@ -9,6 +10,8 @@ import MarkdownText from '../components/MarkdownText';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Octicons from '@expo/vector-icons/Octicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CHARACTERS, GACHA_CHARACTERS } from '../characters';
+import RewardModal from '../components/RewardModal';
 
 const CATEGORY_META = {
   health: { label: 'Health', color: '#2ecc71' },
@@ -23,16 +26,86 @@ const getMonthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 
 
 const getDateKey = (date) => `${getMonthKey(date)}-${String(date.getDate()).padStart(2, '0')}`;
 
-function DashboardAvatar({ size }) {
+function DashboardAvatar({ size, sceneWidth, playScore, healthScore, isSleeping, characterId }) {
   const [frame, setFrame] = useState(0);
+  const [walkingLeft, setWalkingLeft] = useState(false);
   const bob = useRef(new Animated.Value(0)).current;
+  const isSick = !isSleeping && typeof healthScore === 'number' && healthScore < 3;
+  const isSitting = !isSleeping && !isSick && typeof playScore === 'number' && playScore <= 3;
+  const isWalking = !isSleeping && !isSick && typeof playScore === 'number' && playScore >= 4
+    && typeof healthScore === 'number' && healthScore >= 4;
+  const isSingleFrame = isSleeping || isSick;
+  const character = CHARACTERS.find((entry) => entry.id === characterId) ?? CHARACTERS[0];
+  const maxTravel = Math.max(0, (sceneWidth - size) / 2 - 12);
+  const horizontalPosition = useRef(new Animated.Value(-maxTravel)).current;
+  const walkingAnimation = useRef(null);
+  const spriteSource = isSleeping
+    ? character.sprites.sleeping
+    : isSick
+      ? character.sprites.sick
+      : isSitting
+        ? character.sprites.sitting
+        : isWalking
+          ? character.sprites.walking
+          : character.sprites.idle;
+  const accessibilityLabel = isSleeping
+    ? 'Sleeping pixel-art companion'
+    : isSick
+      ? 'Sick pixel-art companion'
+      : isSitting
+        ? 'Sitting pixel-art companion'
+        : isWalking
+          ? 'Walking pixel-art companion'
+          : 'Animated pixel-art companion';
 
   useEffect(() => {
-    const interval = setInterval(() => setFrame((current) => (current + 1) % 9), 140);
+    const frameCount = isSingleFrame ? 1 : isSitting ? 2 : isWalking ? 9 : 8;
+    const interval = setInterval(
+      () => setFrame((current) => (current + 1) % frameCount),
+      isSitting ? 4000 : isWalking ? 360 : 140
+    );
     return () => clearInterval(interval);
-  }, []);
+  }, [isSingleFrame, isSitting, isWalking]);
 
   useEffect(() => {
+    if (!isWalking || maxTravel === 0) {
+      horizontalPosition.setValue(0);
+      setWalkingLeft(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const animateTo = (destination, facesLeft) => {
+      setWalkingLeft(facesLeft);
+      const animation = Animated.timing(horizontalPosition, {
+        toValue: destination,
+        duration: 5000,
+        useNativeDriver: true,
+      });
+      walkingAnimation.current = animation;
+      animation.start(({ finished }) => {
+        if (finished && !cancelled) {
+          const nextDestination = destination === maxTravel ? -maxTravel : maxTravel;
+          animateTo(nextDestination, nextDestination < destination);
+        }
+      });
+    };
+
+    horizontalPosition.setValue(-maxTravel);
+    animateTo(maxTravel, false);
+    return () => {
+      cancelled = true;
+      walkingAnimation.current?.stop();
+    };
+  }, [horizontalPosition, isWalking, maxTravel]);
+
+  useEffect(() => {
+    if (!isWalking) {
+      bob.stopAnimation();
+      bob.setValue(0);
+      return undefined;
+    }
+
     const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(bob, { toValue: -3, duration: 650, useNativeDriver: true }),
@@ -41,20 +114,56 @@ function DashboardAvatar({ size }) {
     );
     animation.start();
     return () => animation.stop();
-  }, [bob]);
+  }, [bob, isWalking]);
 
   return (
-    <View style={[styles.avatarViewport, { width: size, height: size * 25 / 24 }]} accessible accessibilityLabel="Animated pixel-art companion">
-      <Animated.Image
-        source={require('../assets/avatar-idle.png')}
-        resizeMode="stretch"
-        style={[styles.avatarSprite, { width: size * 9, height: size * 25 / 24, left: -frame * size, transform: [{ translateY: bob }] }]}
-      />
+    <View style={{ width: sceneWidth, height: size * 25 / 24 }} accessible accessibilityLabel={accessibilityLabel}>
+      <Animated.View
+        style={{
+          position: 'absolute',
+          left: isWalking ? (sceneWidth - size) / 2 : (sceneWidth - size) / 2 - 90,
+          width: size,
+          height: size * 25 / 24,
+          transform: [{ translateX: horizontalPosition }],
+        }}
+      >
+        <Animated.View
+          style={[
+            styles.avatarViewport,
+            {
+              width: size,
+              height: size * 25 / 24,
+              transform: [{ scaleX: isWalking && walkingLeft ? -1 : 1 }],
+            },
+          ]}
+        >
+          <Animated.Image
+            source={spriteSource}
+            resizeMode="stretch"
+            style={[styles.avatarSprite, { width: size * (isSingleFrame ? 1 : 9), height: size * 25 / 24, left: -(frame % (isSingleFrame ? 1 : isWalking ? 9 : 8)) * size, transform: [{ translateY: isWalking ? bob : 0 }] }]}
+          />
+        </Animated.View>
+        {isSleeping && (
+          <ExpoImage
+            source={require('../assets/sleeping-zzz.png')}
+            contentFit="contain"
+            autoplay
+            style={{
+              position: 'absolute',
+              top: -size * -0.1,
+              right: -size * -0.1,
+              width: size * 0.7,
+              height: size * 0.52,
+            }}
+            pointerEvents="none"
+          />
+        )}
+      </Animated.View>
     </View>
   );
 }
 
-export default function ReportsScreen() {
+export default function ReportsScreen({ characterProgressVersion }) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -64,6 +173,7 @@ export default function ReportsScreen() {
   const sceneHeight = Math.max(avatarHeight + dialSize * 2 + 24, height - insets.top - 264);
   const [period, setPeriod] = useState('week'); // 'week' | 'month'
   const [report, setReport] = useState(null);
+  const [localHour, setLocalHour] = useState(() => new Date().getHours());
   const [aiSummary, setAiSummary] = useState(null);
   const [loadingAI, setLoadingAI] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -80,6 +190,17 @@ export default function ReportsScreen() {
   const [dayPage, setDayPage] = useState(1);
   const [loadingDay, setLoadingDay] = useState(false);
   const [savingDay, setSavingDay] = useState(false);
+  const [characterProgress, setCharacterProgress] = useState(null);
+  const [charactersVisible, setCharactersVisible] = useState(false);
+  const [drawingCharacter, setDrawingCharacter] = useState(false);
+  const [rewardMessages, setRewardMessages] = useState([]);
+  const [gachaRevealCharacter, setGachaRevealCharacter] = useState(null);
+  const [gachaAnimating, setGachaAnimating] = useState(false);
+  const [gachaFlash, setGachaFlash] = useState(false);
+  const fallingStarX = useRef(new Animated.Value(180)).current;
+  const fallingStarY = useRef(new Animated.Value(-260)).current;
+  const gachaFlashOpacity = useRef(new Animated.Value(0)).current;
+  const gachaFlashScale = useRef(new Animated.Value(0.15)).current;
 
   const load = useCallback(async () => {
     const daysBack = period === 'week' ? 7 : 30;
@@ -91,6 +212,17 @@ export default function ReportsScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    getCharacterProgress()
+      .then(setCharacterProgress)
+      .catch((error) => Alert.alert('Could not load characters', error.message));
+  }, [characterProgressVersion]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setLocalHour(new Date().getHours()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const monthKey = getMonthKey(calendarMonth);
   const loadRatedDays = useCallback(async () => {
@@ -168,9 +300,15 @@ export default function ReportsScreen() {
     setSavingDay(true);
     try {
       await updateRatingsForDay(selectedDate, dayScores, dayNote.trim() || null);
+      const reward = await recordHistoricalRatingProgress();
+      setCharacterProgress(reward.progress);
+      const messages = [];
+      if (reward.unlockedCharacters.includes('leafhead')) messages.push('Leafhead is now yours!');
+      if (reward.earnedGachaPull) messages.push('You earned a gacha pull for logging another 7 days!');
       setSelectedDate(null);
       setDayScores(null);
       await Promise.all([load(), loadRatedDays()]);
+      if (messages.length > 0) setRewardMessages(messages);
     } catch (error) {
       Alert.alert('Could not save rating', error.message);
     } finally {
@@ -178,10 +316,94 @@ export default function ReportsScreen() {
     }
   };
 
+  const handleSelectCharacter = async (characterId) => {
+    try {
+      setCharacterProgress(await setActiveCharacter(characterId));
+    } catch (error) {
+      Alert.alert('Could not change character', error.message);
+    }
+  };
+
+  const handleDrawCharacter = async () => {
+    setDrawingCharacter(true);
+    try {
+      const result = await drawCharacter(GACHA_CHARACTERS);
+      setCharacterProgress(result.progress);
+      setGachaRevealCharacter(result.character);
+      setGachaAnimating(true);
+      setGachaFlash(false);
+      fallingStarX.setValue(210);
+      fallingStarY.setValue(-220);
+      gachaFlashOpacity.setValue(0);
+      gachaFlashScale.setValue(0.15);
+      Animated.parallel([
+        Animated.timing(fallingStarX, {
+          toValue: 0,
+          duration: 850,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fallingStarY, {
+          toValue: 0,
+          duration: 850,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (!finished) return;
+        setGachaFlash(true);
+        Animated.sequence([
+          Animated.delay(80),
+          Animated.parallel([
+            Animated.timing(gachaFlashOpacity, {
+              toValue: 0.95,
+              duration: 100,
+              useNativeDriver: true,
+            }),
+            Animated.timing(gachaFlashScale, {
+              toValue: 5,
+              duration: 240,
+              easing: Easing.out(Easing.quad),
+              useNativeDriver: true,
+            }),
+          ]),
+          Animated.parallel([
+            Animated.timing(gachaFlashOpacity, {
+              toValue: 0,
+              duration: 320,
+              useNativeDriver: true,
+            }),
+            Animated.timing(gachaFlashScale, {
+              toValue: 7,
+              duration: 320,
+              easing: Easing.out(Easing.quad),
+              useNativeDriver: true,
+            }),
+          ]),
+        ]).start(({ finished: flashFinished }) => {
+          if (flashFinished) {
+            setGachaFlash(false);
+            setGachaAnimating(false);
+          }
+        });
+      });
+    } catch (error) {
+      Alert.alert('Could not draw a character', error.message);
+    } finally {
+      setDrawingCharacter(false);
+    }
+  };
+
+  const closeRewardModal = () => setRewardMessages([]);
+
   const ratedAverages = report
     ? Object.values(report).map((data) => data.average).filter((average) => average !== null)
     : [];
   const lowestAverage = ratedAverages.length > 0 ? Math.min(...ratedAverages) : null;
+  const isSleepingTime = localHour >= 23 || localHour < 6;
+  const isNightTime = localHour >= 20 || localHour < 4;
+  const isSunriseTime = localHour === 6;
+  const isSunsetTime = localHour === 18;
 
   return (
     <>
@@ -213,6 +435,14 @@ export default function ReportsScreen() {
             ) : (
               <Octicons name="sparkles-fill" size={24} color={theme.primaryButtonText} />
             )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
+            onPress={() => setCharactersVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Open character collection"
+          >
+            <MaterialIcons name="face" size={24} color={theme.primaryButtonText} />
           </TouchableOpacity>
         </View>
       </View>
@@ -263,13 +493,39 @@ export default function ReportsScreen() {
       )}
       <View style={[styles.avatarContainer, { height: sceneHeight - dialSize }]}>
         <Image
-          source={require('../assets/pixel_sky_grass_bg.png')}
+          source={isNightTime
+            ? require('../assets/night/night-bg.png')
+            : isSunriseTime
+              ? require('../assets/sunrise/sunrise-bg.png')
+              : isSunsetTime
+                ? require('../assets/sunset/sunset-bg.png')
+                : require('../assets/day/day-bg.png')}
           resizeMode="stretch"
           style={styles.sceneBackdrop}
           pointerEvents="none"
         />
-        <View style={[styles.avatarPosition, { top: (sceneHeight - dialSize - avatarHeight) / 2 }]}>
-          <DashboardAvatar size={avatarSize} />
+        <ExpoImage
+          source={isNightTime
+            ? require('../assets/night/night-clouds-moving.png')
+            : isSunriseTime
+              ? require('../assets/sunrise/sunrise-clouds-moving.png')
+              : isSunsetTime
+                ? require('../assets/sunset/sunset-clouds-moving.png')
+                : require('../assets/day/day-clouds-moving.png')}
+          contentFit="fill"
+          autoplay
+          style={[styles.sceneBackdrop, { zIndex: 1 }]}
+          pointerEvents="none"
+        />
+        <View style={[styles.avatarPosition, { top: (sceneHeight - dialSize - avatarHeight) / 2 + 80, zIndex: 2 }]}>
+          <DashboardAvatar
+            size={avatarSize}
+            sceneWidth={width}
+            playScore={report?.play.average}
+            healthScore={report?.health.average}
+            isSleeping={isSleepingTime}
+            characterId={characterProgress?.active_character ?? 'basic'}
+          />
         </View>
       </View>
 
@@ -396,6 +652,151 @@ export default function ReportsScreen() {
       </View>
     </Modal>
     <Modal
+      visible={charactersVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setCharactersVisible(false)}
+    >
+      <View style={styles.charactersOverlay}>
+        <View style={[styles.charactersModal, { backgroundColor: theme.background, borderColor: theme.border }]}>
+          <View style={styles.charactersHeader}>
+            <Text style={[styles.dayModalTitle, { color: theme.text }]}>Characters</Text>
+            <TouchableOpacity
+              style={styles.dayModalClose}
+              onPress={() => setCharactersVisible(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close character collection"
+            >
+              <Octicons name="x" size={20} color={theme.text} />
+            </TouchableOpacity>
+          </View>
+          {characterProgress && (
+            <>
+              <Text style={[styles.charactersSummary, { color: theme.muted }]}>
+                {characterProgress.owned_characters.length} / {CHARACTERS.length} unlocked · {characterProgress.rating_days} days rated
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.gachaButton,
+                  { backgroundColor: theme.primaryButton },
+                  (characterProgress.gacha_pulls < 1 || GACHA_CHARACTERS.every((character) => characterProgress.owned_characters.includes(character.id))) && styles.gachaButtonDisabled,
+                ]}
+                onPress={handleDrawCharacter}
+                disabled={
+                  drawingCharacter
+                  || characterProgress.gacha_pulls < 1
+                  || GACHA_CHARACTERS.every((character) => characterProgress.owned_characters.includes(character.id))
+                }
+                accessibilityRole="button"
+              >
+                <MaterialIcons name="casino" size={22} color={theme.primaryButtonText} />
+                <Text style={[styles.gachaButtonText, { color: theme.primaryButtonText }]}>
+                  {drawingCharacter ? 'Drawing...' : `Pull a character (${characterProgress.gacha_pulls})`}
+                </Text>
+              </TouchableOpacity>
+              <Text style={[styles.collectionHint, { color: theme.muted }]}>
+                Log ratings on any 3 days to unlock Leafhead. Every 7 days rated earns a pull.
+              </Text>
+              <ScrollView contentContainerStyle={styles.characterGrid}>
+                {characterProgress.owned_characters
+                  .map((characterId) => CHARACTERS.find((character) => character.id === characterId))
+                  .filter(Boolean)
+                  .map((character) => {
+                  const selected = characterProgress.active_character === character.id;
+                  return (
+                    <TouchableOpacity
+                      key={character.id}
+                      style={[
+                        styles.characterCard,
+                        { backgroundColor: theme.surface, borderColor: selected ? theme.accent : theme.border },
+                      ]}
+                      onPress={() => handleSelectCharacter(character.id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={character.name}
+                    >
+                      <View style={styles.characterPreview}>
+                        <Image
+                          source={character.sprites.idle}
+                          resizeMode="stretch"
+                          style={styles.characterPreviewSprite}
+                        />
+                      </View>
+                      <Text style={[styles.characterName, { color: theme.text }]}>{character.name}</Text>
+                      {selected && <MaterialIcons name="check-circle" size={18} color={theme.accent} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </>
+          )}
+          {(gachaAnimating || gachaRevealCharacter) && (
+            <View style={styles.gachaRevealOverlay}>
+              {gachaAnimating && !gachaFlash ? (
+                <Animated.View
+                  style={[
+                    styles.fallingStar,
+                    {
+                      transform: [
+                        { translateX: fallingStarX },
+                        { translateY: fallingStarY },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={styles.starTrail}>
+                    <View style={[styles.starTrailLine, styles.starTrailGlow]} />
+                    <View style={[styles.starTrailLine, styles.starTrailMid]} />
+                    <View style={[styles.starTrailLine, styles.starTrailCore]} />
+                  </View>
+                  <MaterialIcons name="star" size={48} color="#ffe36e" />
+                  <MaterialIcons name="auto-awesome" size={24} color="#fff5bd" style={styles.starSparkle} />
+                </Animated.View>
+              ) : gachaAnimating ? (
+                <>
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.gachaWhiteFlash, { opacity: gachaFlashOpacity }]}
+                  />
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.gachaFlashBurst,
+                      {
+                        opacity: gachaFlashOpacity,
+                        transform: [{ scale: gachaFlashScale }],
+                      },
+                    ]}
+                  />
+                </>
+              ) : (
+                <View style={[styles.gachaRevealCard, { backgroundColor: theme.surface, borderColor: theme.accent }]}>
+                  <MaterialIcons name="auto-awesome" size={28} color={theme.accent} />
+                  <Text style={[styles.gachaRevealTitle, { color: theme.text }]}>A new character!</Text>
+                  <View style={styles.gachaRevealPreview}>
+                    <Image
+                      source={gachaRevealCharacter.sprites.idle}
+                      resizeMode="stretch"
+                      style={styles.gachaRevealSprite}
+                    />
+                  </View>
+                  <Text style={[styles.gachaRevealName, { color: theme.text }]}>{gachaRevealCharacter.name}</Text>
+                  <TouchableOpacity
+                    style={[styles.gachaRevealButton, { backgroundColor: theme.primaryButton }]}
+                    onPress={() => setGachaRevealCharacter(null)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={[styles.gachaButtonText, { color: theme.primaryButtonText }]}>Awesome!</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      </View>
+    </Modal>
+    <RewardModal rewards={rewardMessages} onClose={closeRewardModal} />
+    <Modal
       visible={Boolean(selectedDate)}
       transparent
       animationType="slide"
@@ -489,7 +890,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   title: { fontSize: 26, fontWeight: '700', color: '#fff' },
   headerActions: { flexDirection: 'row', gap: 8 },
-  avatarContainer: { position: 'relative', width: '100%', alignItems: 'center', marginTop: 0, marginBottom: 20, overflow: 'hidden', borderWidth: 3, borderColor: '#557c70' },
+  avatarContainer: { position: 'relative', width: '100%', alignItems: 'center', marginTop: 0, marginBottom: 20, overflow: 'hidden'},
   sceneBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%', zIndex: 0 },
   avatarPosition: { position: 'absolute', alignSelf: 'center', zIndex: 1 },
   avatarViewport: { overflow: 'hidden' },
@@ -539,6 +940,35 @@ const styles = StyleSheet.create({
   aiModalClose: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   aiModalBody: { flexGrow: 0 },
   aiCardTitle: { fontWeight: '700', fontSize: 17 },
+  charactersOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)', justifyContent: 'center', padding: 20 },
+  charactersModal: { maxHeight: '88%', borderWidth: 1, borderRadius: 16, padding: 18 },
+  charactersHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  charactersSummary: { fontSize: 13, marginBottom: 10 },
+  gachaButton: { minHeight: 46, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
+  gachaButtonDisabled: { opacity: 0.5 },
+  gachaButtonText: { fontSize: 15, fontWeight: '700' },
+  collectionHint: { fontSize: 12, lineHeight: 17, marginTop: 8, marginBottom: 10 },
+  characterGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', gap: 8, paddingBottom: 12 },
+  characterCard: { width: '31.5%', minHeight: 116, borderWidth: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center', padding: 6 },
+  characterPreview: { width: 58, height: 61, overflow: 'hidden' },
+  characterPreviewSprite: { position: 'absolute', top: 0, left: 0, width: 58 * 9, height: 58 * 25 / 24 },
+  characterName: { fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  gachaRevealOverlay: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20, backgroundColor: 'rgba(0, 0, 0, 0.72)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  gachaWhiteFlash: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: '#fff' },
+  gachaFlashBurst: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: '#fff' },
+  fallingStar: { position: 'absolute', top: '50%', alignItems: 'center', justifyContent: 'center', shadowColor: '#ffe36e', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 18, elevation: 12 },
+  starTrail: { position: 'absolute', left: 2, top: -32, width: 150, height: 6, transform: [{ rotate: '-45deg' }], alignItems: 'flex-end', justifyContent: 'center' },
+  starTrailLine: { position: 'absolute', right: 0, borderRadius: 4 },
+  starTrailGlow: { width: 150, height: 10, backgroundColor: 'rgba(255, 218, 93, 0.16)' },
+  starTrailMid: { width: 118, height: 5, backgroundColor: 'rgba(255, 228, 128, 0.42)' },
+  starTrailCore: { width: 82, height: 2, backgroundColor: 'rgba(255, 255, 224, 0.9)' },
+  starSparkle: { position: 'absolute', right: -9, top: -8 },
+  gachaRevealCard: { width: '82%', maxWidth: 300, borderWidth: 1, borderRadius: 20, alignItems: 'center', padding: 22 },
+  gachaRevealTitle: { fontSize: 22, fontWeight: '700', marginTop: 8 },
+  gachaRevealPreview: { width: 80, height: 84, overflow: 'hidden', marginTop: 12 },
+  gachaRevealSprite: { position: 'absolute', top: 0, left: 0, width: 80 * 9, height: 80 * 25 / 24 },
+  gachaRevealName: { fontSize: 18, fontWeight: '700', marginTop: 2, marginBottom: 16 },
+  gachaRevealButton: { width: '100%', minHeight: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   dayModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)', justifyContent: 'center', padding: 20 },
   dayModal: { maxHeight: '85%', borderRadius: 10, padding: 18 },
   dayModalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

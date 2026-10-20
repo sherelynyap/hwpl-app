@@ -2,10 +2,10 @@ import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'hwpl.db';
 const BACKUP_FORMAT = 'hwpl-backup';
-const BACKUP_VERSION = 1;
+const BACKUP_VERSION = 3;
 let dbInstance = null;
 
-const BACKUP_TABLES = {
+const LEGACY_BACKUP_TABLES = {
   ratings: ['id', 'category', 'score', 'note', 'created_at'],
   items: ['id', 'title', 'description', 'deadline', 'status', 'created_at'],
   notes: ['id', 'content', 'created_at', 'is_archived', 'category'],
@@ -15,6 +15,61 @@ const BACKUP_TABLES = {
   ],
   monthly_themes: ['month_key', 'theme_text', 'created_at'],
 };
+
+const CHARACTER_PROGRESS_BACKUP_COLUMNS_V2 = [
+  'id', 'active_character', 'owned_characters', 'gacha_pulls',
+  'last_rating_date', 'streak_days',
+];
+
+const CHARACTER_PROGRESS_BACKUP_COLUMNS = [
+  ...CHARACTER_PROGRESS_BACKUP_COLUMNS_V2,
+  'rating_days',
+];
+
+const BACKUP_TABLES_V2 = {
+  ...LEGACY_BACKUP_TABLES,
+  character_progress: CHARACTER_PROGRESS_BACKUP_COLUMNS_V2,
+};
+
+const BACKUP_TABLES = {
+  ...LEGACY_BACKUP_TABLES,
+  character_progress: CHARACTER_PROGRESS_BACKUP_COLUMNS,
+};
+
+const DEFAULT_CHARACTER_PROGRESS = {
+  id: 1,
+  active_character: 'basic',
+  owned_characters: JSON.stringify(['basic']),
+  gacha_pulls: 0,
+  last_rating_date: null,
+  streak_days: 0,
+  rating_days: 0,
+};
+
+const getDistinctRatingDays = (ratings) => new Set(ratings.map((row) => {
+  const date = new Date(
+    row.created_at.includes('T') ? row.created_at : row.created_at.replace(' ', 'T')
+  );
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+})).size;
+
+function migrateLegacyCharacterProgress(progress, ratingDays) {
+  const ownedCharacters = JSON.parse(progress.owned_characters);
+  const shouldUnlockLeafhead = ratingDays >= 3 && !ownedCharacters.includes('leafhead');
+  if (shouldUnlockLeafhead) ownedCharacters.push('leafhead');
+  return {
+    ...progress,
+    active_character: shouldUnlockLeafhead && progress.active_character === 'basic'
+      ? 'leafhead'
+      : progress.active_character,
+    owned_characters: JSON.stringify(ownedCharacters),
+    gacha_pulls: progress.gacha_pulls
+      + Math.max(0, Math.floor(ratingDays / 7) - Math.floor(progress.streak_days / 7)),
+    rating_days: ratingDays,
+  };
+}
 
 export async function createDatabaseBackup() {
   const db = await getDb();
@@ -31,13 +86,18 @@ export async function createDatabaseBackup() {
 }
 
 export function validateDatabaseBackup(backup) {
-  if (!backup || backup.format !== BACKUP_FORMAT || backup.version !== BACKUP_VERSION) {
+  if (!backup || backup.format !== BACKUP_FORMAT || ![1, 2, BACKUP_VERSION].includes(backup.version)) {
     throw new Error('This is not a supported HWPL backup file.');
   }
   if (!backup.data || typeof backup.data !== 'object') {
     throw new Error('The backup file is missing its data.');
   }
-  for (const [table, columns] of Object.entries(BACKUP_TABLES)) {
+  const tables = backup.version === 1
+    ? LEGACY_BACKUP_TABLES
+    : backup.version === 2
+      ? BACKUP_TABLES_V2
+      : BACKUP_TABLES;
+  for (const [table, columns] of Object.entries(tables)) {
     const rows = backup.data[table];
     if (!Array.isArray(rows)) throw new Error(`The backup is missing ${table} records.`);
     for (const row of rows) {
@@ -62,18 +122,34 @@ export async function restoreDatabaseBackup(backup) {
       DELETE FROM notes;
       DELETE FROM birth_chart;
       DELETE FROM monthly_themes;
+      DELETE FROM character_progress;
       DELETE FROM sqlite_sequence WHERE name IN ('ratings', 'items', 'notes');
     `);
     for (const [table, columns] of Object.entries(BACKUP_TABLES)) {
-      for (const row of backup.data[table]) {
+      const rows = backup.data[table] ?? (table === 'character_progress' ? [DEFAULT_CHARACTER_PROGRESS] : []);
+      for (const row of rows) {
         const placeholders = columns.map(() => '?').join(', ');
-        const values = columns.map((column) => row[column]);
+        const values = columns.map((column) => row[column] ?? null);
+        if (table === 'character_progress' && backup.version < BACKUP_VERSION) {
+          const ratingDays = getDistinctRatingDays(backup.data.ratings);
+          const migratedProgress = migrateLegacyCharacterProgress(
+            { ...DEFAULT_CHARACTER_PROGRESS, ...row },
+            ratingDays
+          );
+          values[columns.indexOf('active_character')] = migratedProgress.active_character;
+          values[columns.indexOf('owned_characters')] = migratedProgress.owned_characters;
+          values[columns.indexOf('gacha_pulls')] = migratedProgress.gacha_pulls;
+          values[columns.indexOf('rating_days')] = migratedProgress.rating_days;
+        } else if (table === 'character_progress') {
+          values[columns.indexOf('rating_days')] = row.rating_days ?? 0;
+        }
         await db.runAsync(
           `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders});`,
           values
         );
       }
     }
+    await db.runAsync('INSERT OR IGNORE INTO character_progress (id) VALUES (1);');
   });
 }
 
@@ -126,7 +202,52 @@ export async function getDb() {
       theme_text TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS character_progress (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      active_character TEXT NOT NULL DEFAULT 'basic',
+      owned_characters TEXT NOT NULL DEFAULT '["basic"]',
+      gacha_pulls INTEGER NOT NULL DEFAULT 0,
+      last_rating_date TEXT,
+      streak_days INTEGER NOT NULL DEFAULT 0
+    );
   `);
+  await dbInstance.runAsync(
+    'INSERT OR IGNORE INTO character_progress (id) VALUES (1);'
+  );
+  let addedRatingDays = false;
+  try {
+    await dbInstance.execAsync(
+      'ALTER TABLE character_progress ADD COLUMN rating_days INTEGER NOT NULL DEFAULT 0;'
+    );
+    addedRatingDays = true;
+  } catch (error) {
+    if (!error.message.includes('duplicate column name')) throw error;
+  }
+  if (addedRatingDays) {
+    const ratingRows = await dbInstance.getAllAsync(
+      "SELECT DISTINCT date(created_at, 'localtime') AS rating_date FROM ratings;"
+    );
+    const progress = await dbInstance.getFirstAsync(
+      'SELECT * FROM character_progress WHERE id = 1;'
+    );
+    const ownedCharacters = JSON.parse(progress.owned_characters);
+    const shouldUnlockLeafhead = ratingRows.length >= 3 && !ownedCharacters.includes('leafhead');
+    if (shouldUnlockLeafhead) ownedCharacters.push('leafhead');
+    const gachaPulls = progress.gacha_pulls
+      + Math.max(0, Math.floor(ratingRows.length / 7) - Math.floor(progress.streak_days / 7));
+    await dbInstance.runAsync(
+      `UPDATE character_progress
+       SET active_character = ?, owned_characters = ?, gacha_pulls = ?, rating_days = ?
+       WHERE id = 1;`,
+      [
+        shouldUnlockLeafhead && progress.active_character === 'basic' ? 'leafhead' : progress.active_character,
+        JSON.stringify(ownedCharacters),
+        gachaPulls,
+        ratingRows.length,
+      ]
+    );
+  }
   const { user_version: schemaVersion } = await dbInstance.getFirstAsync('PRAGMA user_version;');
   if (schemaVersion < 1) {
     await dbInstance.runAsync('DELETE FROM ratings;');
@@ -162,6 +283,121 @@ export async function addRating(category, score, note = null) {
     'INSERT INTO ratings (category, score, note) VALUES (?, ?, ?);',
     [category, score, note]
   );
+}
+
+const getLocalDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export async function getCharacterProgress() {
+  const db = await getDb();
+  const row = await db.getFirstAsync('SELECT * FROM character_progress WHERE id = 1;');
+  return {
+    ...row,
+    owned_characters: JSON.parse(row.owned_characters),
+  };
+}
+
+async function applyRatingMilestoneRewards(db, progress, ratingDays, ratedToday) {
+  const ownedCharacters = [...progress.owned_characters];
+  const unlockedCharacters = [];
+  if (ratingDays >= 3 && !ownedCharacters.includes('leafhead')) {
+    ownedCharacters.push('leafhead');
+    unlockedCharacters.push('leafhead');
+  }
+  const activeCharacter = unlockedCharacters.includes('leafhead')
+    ? 'leafhead'
+    : progress.active_character;
+  const newlyEarnedPulls = Math.max(
+    0,
+    Math.floor(ratingDays / 7) - Math.floor(progress.rating_days / 7)
+  );
+  const earnedGachaPull = newlyEarnedPulls > 0;
+  const gachaPulls = progress.gacha_pulls + newlyEarnedPulls;
+  const lastRatingDateUpdate = ratedToday ? ', last_rating_date = ?' : '';
+  const values = [activeCharacter, JSON.stringify(ownedCharacters), gachaPulls, ratingDays];
+  if (ratedToday) values.push(getLocalDateKey(new Date()));
+  await db.runAsync(
+    `UPDATE character_progress
+     SET active_character = ?, owned_characters = ?, gacha_pulls = ?, rating_days = ?${lastRatingDateUpdate}
+     WHERE id = 1;`,
+    values
+  );
+
+  return {
+    progress: {
+      ...progress,
+      active_character: activeCharacter,
+      owned_characters: ownedCharacters,
+      gacha_pulls: gachaPulls,
+      last_rating_date: ratedToday ? getLocalDateKey(new Date()) : progress.last_rating_date,
+      rating_days: ratingDays,
+    },
+    unlockedCharacters,
+    earnedGachaPull,
+  };
+}
+
+async function countRatedDays(db) {
+  const { rating_days: ratingDays } = await db.getFirstAsync(
+    "SELECT COUNT(DISTINCT date(created_at, 'localtime')) AS rating_days FROM ratings;"
+  );
+  return ratingDays;
+}
+
+export async function recordDailyRatingProgress() {
+  const db = await getDb();
+  const today = getLocalDateKey(new Date());
+  const progress = await getCharacterProgress();
+  if (progress.last_rating_date === today) {
+    return { progress, unlockedCharacters: [], earnedGachaPull: false };
+  }
+  return applyRatingMilestoneRewards(db, progress, await countRatedDays(db), true);
+}
+
+export async function recordHistoricalRatingProgress() {
+  const db = await getDb();
+  const progress = await getCharacterProgress();
+  return applyRatingMilestoneRewards(db, progress, await countRatedDays(db), false);
+}
+
+export async function setActiveCharacter(characterId) {
+  const db = await getDb();
+  const progress = await getCharacterProgress();
+  if (!progress.owned_characters.includes(characterId)) {
+    throw new Error('You have not unlocked this character.');
+  }
+  await db.runAsync('UPDATE character_progress SET active_character = ? WHERE id = 1;', [characterId]);
+  return { ...progress, active_character: characterId };
+}
+
+export async function drawCharacter(characterPool) {
+  const db = await getDb();
+  const progress = await getCharacterProgress();
+  if (progress.gacha_pulls < 1) {
+    throw new Error('You do not have any gacha pulls.');
+  }
+  const available = characterPool.filter((character) => !progress.owned_characters.includes(character.id));
+  if (available.length === 0) {
+    throw new Error('You have already unlocked every available character.');
+  }
+
+  const character = available[Math.floor(Math.random() * available.length)];
+  const ownedCharacters = [...progress.owned_characters, character.id];
+  const gachaPulls = progress.gacha_pulls - 1;
+  await db.runAsync(
+    `UPDATE character_progress
+     SET owned_characters = ?, gacha_pulls = ?
+     WHERE id = 1;`,
+    [JSON.stringify(ownedCharacters), gachaPulls]
+  );
+  return {
+    character,
+    progress: { ...progress, owned_characters: ownedCharacters, gacha_pulls: gachaPulls },
+  };
 }
 
 export async function getRatingsSince(isoDate) {
@@ -231,8 +467,10 @@ export async function resetDatabase() {
     DELETE FROM notes;
     DELETE FROM birth_chart;
     DELETE FROM monthly_themes;
+    DELETE FROM character_progress;
     DELETE FROM sqlite_sequence WHERE name IN ('ratings', 'items', 'notes');
   `);
+  await db.runAsync('INSERT INTO character_progress (id) VALUES (1);');
 }
 
 /* ---------------- Items ---------------- */

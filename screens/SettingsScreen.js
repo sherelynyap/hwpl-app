@@ -52,7 +52,7 @@ export default function SettingsScreen({ onReset }) {
   const confirmReset = () => {
     Alert.alert(
       'Reset local data?',
-      'This permanently deletes all ratings, items, and notes stored on this phone.',
+      'This permanently deletes all ratings, items, notes, and character progress stored on this phone.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Reset everything', style: 'destructive', onPress: handleReset },
@@ -133,7 +133,7 @@ export default function SettingsScreen({ onReset }) {
       setBackupBusy(false);
       Alert.alert(
         'Replace local data?',
-        'Importing this backup will replace all ratings, items, notes, birth chart details, and saved themes on this phone.',
+        'Importing this backup will replace all ratings, items, notes, character progress, birth chart details, and saved themes on this phone.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -317,7 +317,7 @@ export default function SettingsScreen({ onReset }) {
       >
         <Text style={[styles.resetButtonText, { color: theme.dangerButtonText }]}>{resetting ? 'Resetting...' : 'Reset local database'}</Text>
       </TouchableOpacity>
-      <Text style={[styles.warning, { color: theme.muted }]}>This removes all ratings, outstanding items, and notes.</Text>
+      <Text style={[styles.warning, { color: theme.muted }]}>This removes ratings, outstanding items, notes, and your character collection.</Text>
       <Modal
         visible={selectorType !== null}
         transparent
