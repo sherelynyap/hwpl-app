@@ -1,55 +1,48 @@
 # H.W.P.L — Health, Work, Play, Love tracker
 
-A starter Expo app (iOS + Android from one codebase) with a fully local
-SQLite database — no backend required to run it.
+A local-first Expo wellbeing tracker for iOS and Android. Core app data is
+stored in SQLite on-device; AI features use a configured backend.
 
-This is a personal wellbeing tracker designed for quick check-ins across the
-four life domains that give the app its name: Health, Work, Play, and Love.
-Everything is stored locally on-device, which keeps the experience fast,
-private, and easy to back up or restore without needing a separate server.
+<img src="assets/pic1.jpeg" alt="demo" width="40%">
+<!-- <img src="assets/pic2.jpeg" alt="demo" width="40%">
+<img src="assets/pic3.jpeg" alt="demo" width="40%">
+<img src="assets/pic4.jpeg" alt="demo" width="40%"> -->
+
 
 ## What's included
 
 | Feature | Description |
 |---|---|
-| **Daily rating popup** | Rate Health / Work / Play / Love from 0 to 5 with optional note, stored in the local SQLite database. This is the core habit loop: log a quick check-in, reflect on the week, and build patterns over time. |
-| **Items + notes workflow** | Add outstanding items with an optional deadline (`YYYY-MM-DD`), mark them complete, and keep separate archived notes tagged by Health, Work, Play, or Love. This helps separate tasks from reflections while still keeping all categories in one place. |
-| **Reports dashboard** | Weekly/monthly averages per category, a month-view rating calendar, and an optional "Generate AI summary" button. |
-| **Character collection** | Start as Basic, unlock and switch to Leafhead after logging ratings on any 3 days, then earn a random character pull for every 7 days rated (characters from the snowhex Pixel Plains asset pack: https://snowhex.itch.io/pixel-plains). |
-| **Astrology tab** | Set up a birth chart, review the current moon / transits, and generate a monthly theme based on your chart plus the sky for the month. |
-| **Personalization + backup** | Save your preferred name, theme, and font, then export/import automatic local backups for easy restoration. A regular local backup flow makes the app safer to use as a long-term personal journal. |
-| **Notifications** | A daily reminder to log your ratings and a Wednesday "midweek check-in" push listing how many items are still open (see `notifications.js`). |
+| **Daily ratings** | Rate Health, Work, Play, and Love from 0 to 5, with an optional note. |
+| **Items + notes** | Track tasks with optional deadlines, complete them, and keep separate notes tagged by category. |
+| **Reports** | View weekly/monthly averages and a monthly rating calendar; optionally generate an AI summary. |
+| **Characters** | Start as Basic, unlock Leafhead after rating on 3 days, and earn a random character pull every 7 rated days. Characters use the [Pixel Plains asset pack](https://snowhex.itch.io/pixel-plains). |
+| **Astrology** | Save a birth chart, view the current moon and transits, and generate a monthly theme. |
+| **Personalization + backup** | Set your name, theme, and font; use weekly automatic backups or import/export one in Settings. |
+| **Notifications** | Get a daily rating reminder if no rating is logged, plus a Wednesday summary of outstanding items. |
 
 ## Running it
 
 ```bash
 npm install
-npx expo start
+npm start
 ```
 
-Use Expo Go on a phone for the fastest real-device testing loop, or press `i`
-/ `a` in the terminal to open an iOS or Android simulator.
+Open the project in Expo Go on a phone, or press `i` / `a` to launch an iOS or
+Android simulator.
 
 A few practical notes:
 
 | Topic | Note |
 |---|---|
-| Database | The app uses Expo + local SQLite, so there is no database server to configure. |
-| Backups and exports | For backups and exports, use the personalization area in-app rather than a separate service. |
-| Notifications | Notifications require a physical device or a properly configured simulator — they won't fire in Expo Go on iOS Simulator, only on a real iPhone or a dev build. |
-
-> If you are running the project on a clean machine, make sure you have the
-> standard Expo toolchain installed and available in your terminal before
-> starting the app.
+| Database | Core app data uses local SQLite; no server is needed to run the app. |
+| Backups | Manage automatic backups and import/export in Settings. |
+| Notifications | Require a physical device and notification permission. |
 
 ## AI Summary
 
-The app never calls an LLM API directly from the client — that would
-mean shipping your API key inside the app bundle, which anyone could
-extract. Instead, update `SUMMARY_ENDPOINT` in `ai/summarize.js` to point at your
-deployed URL.
-
-Once that's live, tapping "Generate AI summary" on the Reports tab
-sends that period's averages, notes attached to ratings, and active notes
-tagged by Health, Work, Play, or Love in the matching category, then gets
-back a short reflective summary.
+AI summaries and monthly astrology themes use the backend endpoints configured
+in `ai/summarize.js` and `ai/monthlyTheme.js`; no LLM API key is shipped in the
+app. Summary requests send the selected period's category averages, counts,
+rating notes, and matching tagged notes. Theme requests send the natal chart,
+placements, selected month, and transits.
