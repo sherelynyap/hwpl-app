@@ -1,0 +1,77 @@
+name: Build unsigned iOS IPA
+
+# Manual trigger: GitHub repo -> Actions tab -> "Build unsigned iOS IPA" -> Run workflow
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    # If package.json is NOT at the repo root (e.g. your repo contains an extra
+    # outer folder), uncomment and set this to the folder that holds package.json:
+    # defaults:
+    #   run:
+    #     working-directory: hwpl-app
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm install
+
+      # Generates the native ios/ folder from app.json and runs `pod install`.
+      - name: Expo prebuild (iOS)
+        run: npx expo prebuild --platform ios --no-install && cd ios && pod install
+
+      # Free Apple IDs cannot provision the push-notification entitlement.
+      # The app only uses local notifications, so remove it to avoid signing errors.
+      - name: Strip push entitlement
+        run: |
+          for f in ios/*/*.entitlements; do
+            [ -f "$f" ] || continue
+            /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$f" || true
+            echo "Entitlements after cleanup in $f:"
+            cat "$f"
+          done
+
+      - name: Archive without code signing
+        run: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "Workspace: $WORKSPACE  Scheme: $SCHEME"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/app.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: Package app.ipa
+        run: |
+          APP=$(find "$RUNNER_TEMP/app.xcarchive/Products/Applications" -maxdepth 1 -name "*.app" | head -1)
+          echo "Packaging: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qr app.ipa Payload
+          ls -lh app.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-ipa
+          path: app.ipa
+          retention-days: 14
