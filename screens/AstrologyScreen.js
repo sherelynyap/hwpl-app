@@ -68,7 +68,8 @@ export default function AstrologyScreen() {
       const text = await generateMonthlyTheme(
         { sunSign: chart.sun_sign, moonSign: chart.moon_sign, ascendantSign: chart.ascendant_sign },
         transits,
-        monthLabelFor(now)
+        monthLabelFor(now),
+        placements
       );
       await saveMonthlyTheme(monthKey, text);
       setMonthlyTheme(text);

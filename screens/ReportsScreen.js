@@ -3,7 +3,6 @@ import { Animated, Easing, Image, View, StyleSheet, ScrollView, TouchableOpacity
 import { Image as ExpoImage } from 'expo-image';
 import { buildReport, drawCharacter, getCharacterProgress, getRatedDaysInMonth, getRatingsForDay, getTaggedNotesInRange, recordHistoricalRatingProgress, setActiveCharacter, updateRatingsForDay } from '../db/database';
 import { generateAISummary } from '../ai/summarize';
-import RatingDial from '../components/RatingDial';
 import LinearRatingSlider from '../components/LinearRatingSlider';
 import { AppText as Text, AppTextInput as TextInput, useTheme } from '../theme';
 import MarkdownText from '../components/MarkdownText';
@@ -21,20 +20,63 @@ const CATEGORY_META = {
 };
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const GRASS_LINE_RATIO = 0.807;
+const SLEEPING_Y_OFFSET_RATIO = 0.3; // fraction of avatar size; tune to taste
+
+// tall frames (1,3,5,7,9) pass quickly; low frames (2,4,6,8) hold to give weight
+const WALK_FRAME_MS = [90, 190, 90, 170, 90, 190, 90, 170, 100];
 
 const getMonthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
 const getDateKey = (date) => `${getMonthKey(date)}-${String(date.getDate()).padStart(2, '0')}`;
+const MAX_RATING = 5; // set to your rating scale's max
+const BAR_LABELS = { health: 'HEALTH', work: 'WORK', play: 'FUN', love: 'LOVE' };
 
-function DashboardAvatar({ size, sceneWidth, playScore, healthScore, isSleeping, characterId }) {
+function GameBar({ label, value, color, glow, dimmed }) {
+  const fill = useRef(new Animated.Value(0)).current;
+  const ratio = typeof value === 'number' ? Math.max(0, Math.min(1, value / MAX_RATING)) : 0;
+
+  useEffect(() => {
+    Animated.timing(fill, {
+      toValue: ratio,
+      duration: 600,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false, // width can't use the native driver
+    }).start();
+  }, [fill, ratio]);
+
+  return (
+    <View style={[styles.barRow, dimmed && styles.dimmedBar]}>
+      <Text style={[styles.barLabel, glow && { textShadowColor: color, textShadowRadius: 6 }]}>{label}</Text>
+      <View style={[styles.barTrackGlow, glow && { shadowColor: color }, glow && styles.barTrackGlowActive]}>
+        <View style={[styles.barTrack, glow && { borderColor: color }]}>
+          <Animated.View
+            style={[
+              styles.barFill,
+              {
+                backgroundColor: color,
+                width: fill.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+              },
+            ]}
+          />
+          <View style={styles.barShine} />
+          {Array.from({ length: MAX_RATING - 1 }, (_, i) => (
+            <View key={i} style={[styles.barTick, { left: `${((i + 1) / MAX_RATING) * 100}%` }]} />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function DashboardAvatar({ size, sceneWidth, playScore, healthScore, loveScore, isSleeping, characterId }) {
   const [frame, setFrame] = useState(0);
   const [walkingLeft, setWalkingLeft] = useState(false);
-  const bob = useRef(new Animated.Value(0)).current;
   const isSick = !isSleeping && typeof healthScore === 'number' && healthScore < 3;
   const isSitting = !isSleeping && !isSick && typeof playScore === 'number' && playScore <= 3;
   const isWalking = !isSleeping && !isSick && typeof playScore === 'number' && playScore >= 4
     && typeof healthScore === 'number' && healthScore >= 4;
-  const isSingleFrame = isSleeping || isSick;
+  const isSingleFrame = isSleeping || isSick ;
   const character = CHARACTERS.find((entry) => entry.id === characterId) ?? CHARACTERS[0];
   const maxTravel = Math.max(0, (sceneWidth - size) / 2 - 12);
   const horizontalPosition = useRef(new Animated.Value(-maxTravel)).current;
@@ -59,12 +101,20 @@ function DashboardAvatar({ size, sceneWidth, playScore, healthScore, isSleeping,
           : 'Animated pixel-art companion';
 
   useEffect(() => {
-    const frameCount = isSingleFrame ? 1 : isSitting ? 2 : isWalking ? 9 : 8;
-    const interval = setInterval(
-      () => setFrame((current) => (current + 1) % frameCount),
-      isSitting ? 4000 : isWalking ? 360 : 140
-    );
-    return () => clearInterval(interval);
+    setFrame(0);
+    if (isSingleFrame) return undefined;
+
+    const frameCount = isSitting ? 2 : isWalking ? 9 : 8;
+    const delayFor = (index) => (isSitting ? 4000 : isWalking ? WALK_FRAME_MS[index] : 140);
+    let index = 0;
+    let timeout;
+    const step = () => {
+      index = (index + 1) % frameCount;
+      setFrame(index);
+      timeout = setTimeout(step, delayFor(index));
+    };
+    timeout = setTimeout(step, delayFor(0));
+    return () => clearTimeout(timeout);
   }, [isSingleFrame, isSitting, isWalking]);
 
   useEffect(() => {
@@ -80,6 +130,7 @@ function DashboardAvatar({ size, sceneWidth, playScore, healthScore, isSleeping,
       const animation = Animated.timing(horizontalPosition, {
         toValue: destination,
         duration: 5000,
+        easing: Easing.bezier(0.4, 0.15, 0.6, 0.85),
         useNativeDriver: true,
       });
       walkingAnimation.current = animation;
@@ -99,23 +150,6 @@ function DashboardAvatar({ size, sceneWidth, playScore, healthScore, isSleeping,
     };
   }, [horizontalPosition, isWalking, maxTravel]);
 
-  useEffect(() => {
-    if (!isWalking) {
-      bob.stopAnimation();
-      bob.setValue(0);
-      return undefined;
-    }
-
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(bob, { toValue: -3, duration: 650, useNativeDriver: true }),
-        Animated.timing(bob, { toValue: 0, duration: 650, useNativeDriver: true }),
-      ])
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [bob, isWalking]);
-
   return (
     <View style={{ width: sceneWidth, height: size * 25 / 24 }} accessible accessibilityLabel={accessibilityLabel}>
       <Animated.View
@@ -124,7 +158,10 @@ function DashboardAvatar({ size, sceneWidth, playScore, healthScore, isSleeping,
           left: isWalking ? (sceneWidth - size) / 2 : (sceneWidth - size) / 2 - 90,
           width: size,
           height: size * 25 / 24,
-          transform: [{ translateX: horizontalPosition }],
+          transform: [
+            { translateX: horizontalPosition },
+            { translateY: isSleeping ? size * SLEEPING_Y_OFFSET_RATIO : 0 },
+          ],
         }}
       >
         <Animated.View
@@ -140,7 +177,7 @@ function DashboardAvatar({ size, sceneWidth, playScore, healthScore, isSleeping,
           <Animated.Image
             source={spriteSource}
             resizeMode="stretch"
-            style={[styles.avatarSprite, { width: size * (isSingleFrame ? 1 : 9), height: size * 25 / 24, left: -(frame % (isSingleFrame ? 1 : isWalking ? 9 : 8)) * size, transform: [{ translateY: isWalking ? bob : 0 }] }]}
+            style={[styles.avatarSprite, { width: size * (isSingleFrame ? 1 : 9), height: size * 25 / 24, left: -(frame % (isSingleFrame ? 1 : isWalking ? 9 : 8)) * size }]}
           />
         </Animated.View>
         {isSleeping && (
@@ -150,8 +187,8 @@ function DashboardAvatar({ size, sceneWidth, playScore, healthScore, isSleeping,
             autoplay
             style={{
               position: 'absolute',
-              top: -size * -0.1,
-              right: -size * -0.1,
+              top: -size * 0.2,
+              right: -size * -0.3,
               width: size * 0.7,
               height: size * 0.52,
             }}
@@ -167,10 +204,9 @@ export default function ReportsScreen({ characterProgressVersion }) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const dialSize = Math.max(52, Math.min(82, Math.floor((width - 40) / 4) - 8));
   const avatarSize = Math.min(144, (width - 40) / 2);
   const avatarHeight = avatarSize * 25 / 24;
-  const sceneHeight = Math.max(avatarHeight + dialSize * 2 + 24, height - insets.top - 264);
+  const sceneHeight = Math.max(avatarHeight + 160, height - insets.top - 264);
   const [period, setPeriod] = useState('week'); // 'week' | 'month'
   const [report, setReport] = useState(null);
   const [localHour, setLocalHour] = useState(() => new Date().getHours());
@@ -407,480 +443,471 @@ export default function ReportsScreen({ characterProgressVersion }) {
 
   return (
     <>
-    <ScrollView
-      style={[styles.container, { backgroundColor: theme.background }]}
-      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.accent} />}
-    >
-      <View style={styles.titleRow}>
-        <Text style={[styles.title, { color: theme.text }]}>Dashboard</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
-            onPress={() => setCalendarVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Open calendar"
-          >
-            <MaterialIcons name="calendar-month" size={24} color={theme.primaryButtonText} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
-            onPress={handleGenerateSummary}
-            disabled={loadingAI}
-            accessibilityRole="button"
-            accessibilityLabel="Generate AI summary"
-          >
-            {loadingAI ? (
-              <ActivityIndicator color={theme.primaryButtonText} />
-            ) : (
-              <Octicons name="sparkles-fill" size={24} color={theme.primaryButtonText} />
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
-            onPress={() => setCharactersVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Open character collection"
-          >
-            <MaterialIcons name="face" size={24} color={theme.primaryButtonText} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.toggleRow}>
-        <TouchableOpacity
-          style={[styles.toggleButton, { backgroundColor: theme.surface }, period === 'week' && { backgroundColor: theme.primaryButton }]}
-          onPress={() => setPeriod('week')}
-        >
-          <Text style={[styles.toggleText, { color: theme.muted }, period === 'week' && { color: theme.primaryButtonText }]}>Weekly</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toggleButton, { backgroundColor: theme.surface }, period === 'month' && { backgroundColor: theme.primaryButton }]}
-          onPress={() => setPeriod('month')}
-        >
-          <Text style={[styles.toggleText, { color: theme.muted }, period === 'month' && { color: theme.primaryButtonText }]}>Monthly</Text>
-        </TouchableOpacity>
-      </View>
-
-      {report && (
-        <View style={styles.dialGrid}>
-          {['health', 'work', 'play', 'love'].map((cat) => {
-            const data = report[cat];
-            const meta = CATEGORY_META[cat];
-            const isLowest = lowestAverage !== null && data.average === lowestAverage;
-            return (
-              <View
-                key={cat}
-                style={[
-                  styles.dialItem,
-                  lowestAverage !== null && !isLowest && styles.dimmedDial,
-                ]}
-              >
-                <RatingDial
-                  readOnly
-                  size={dialSize}
-                  compact
-                  value={data.average ?? 0}
-                  displayText={data.average !== null ? data.average.toFixed(1) : '\u2014'}
-                  color={meta.color}
-                  label={meta.label}
-                  glow={isLowest}
-                />
-              </View>
-            );
-          })}
-        </View>
-      )}
-      <View style={[styles.avatarContainer, { height: sceneHeight - dialSize }]}>
-        <Image
-          source={isNightTime
-            ? require('../assets/night/night-bg.png')
-            : isSunriseTime
-              ? require('../assets/sunrise/sunrise-bg.png')
-              : isSunsetTime
-                ? require('../assets/sunset/sunset-bg.png')
-                : require('../assets/day/day-bg.png')}
-          resizeMode="stretch"
-          style={styles.sceneBackdrop}
-          pointerEvents="none"
-        />
-        <ExpoImage
-          source={isNightTime
-            ? require('../assets/night/night-clouds-moving.png')
-            : isSunriseTime
-              ? require('../assets/sunrise/sunrise-clouds-moving.png')
-              : isSunsetTime
-                ? require('../assets/sunset/sunset-clouds-moving.png')
-                : require('../assets/day/day-clouds-moving.png')}
-          contentFit="fill"
-          autoplay
-          style={[styles.sceneBackdrop, { zIndex: 1 }]}
-          pointerEvents="none"
-        />
-        <View style={[styles.avatarPosition, { top: (sceneHeight - dialSize - avatarHeight) / 2 + 80, zIndex: 2 }]}>
-          <DashboardAvatar
-            size={avatarSize}
-            sceneWidth={width}
-            playScore={report?.play.average}
-            healthScore={report?.health.average}
-            isSleeping={isSleepingTime}
-            characterId={characterProgress?.active_character ?? 'basic'}
-          />
-        </View>
-      </View>
-
-    </ScrollView>
-    <Modal
-      visible={calendarVisible}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setCalendarVisible(false)}
-    >
-      <View style={styles.calendarModalOverlay}>
-        <View style={[styles.calendarModal, { backgroundColor: theme.background, borderColor: theme.border }]}>
-          <View style={styles.calendarModalHeader}>
-            <Text style={[styles.dayModalTitle, { color: theme.text }]}>Calendar</Text>
+      <ScrollView
+        style={[styles.container, { backgroundColor: theme.background }]}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.accent} />}
+      >
+        <View style={styles.titleRow}>
+          <Text style={[styles.title, { color: theme.text }]}>Dashboard</Text>
+          <View style={styles.headerActions}>
             <TouchableOpacity
-              style={styles.dayModalClose}
-              onPress={() => setCalendarVisible(false)}
+              style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
+              onPress={() => setCalendarVisible(true)}
               accessibilityRole="button"
-              accessibilityLabel="Close calendar"
+              accessibilityLabel="Open calendar"
             >
-              <Octicons name="x" size={20} color={theme.text} />
+              <MaterialIcons name="calendar-month" size={24} color={theme.primaryButtonText} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
+              onPress={handleGenerateSummary}
+              disabled={loadingAI}
+              accessibilityRole="button"
+              accessibilityLabel="Generate AI summary"
+            >
+              {loadingAI ? (
+                <ActivityIndicator color={theme.primaryButtonText} />
+              ) : (
+                <Octicons name="sparkles-fill" size={24} color={theme.primaryButtonText} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.aiButton, { backgroundColor: theme.primaryButton }]}
+              onPress={() => setCharactersVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Open character collection"
+            >
+              <MaterialIcons name="face" size={24} color={theme.primaryButtonText} />
             </TouchableOpacity>
           </View>
-          <View style={[styles.calendar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={styles.calendarHeader}>
-              <TouchableOpacity
-                style={styles.monthArrow}
-                onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}
-                accessibilityRole="button"
-                accessibilityLabel="Previous month"
-              >
-                <Text style={[styles.monthArrowText, { color: theme.text }]}>{'\u2039'}</Text>
-              </TouchableOpacity>
-              <Text style={[styles.monthTitle, { color: theme.text }]}>
-                {calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-              </Text>
-              <TouchableOpacity
-                style={[styles.monthArrow, isCurrentMonth && styles.disabledArrow]}
-                onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}
-                disabled={isCurrentMonth}
-                accessibilityRole="button"
-                accessibilityLabel="Next month"
-              >
-                <Text style={[styles.monthArrowText, { color: isCurrentMonth ? theme.muted : theme.text }]}>{'\u203a'}</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.calendarGrid}>
-              {WEEKDAYS.map((weekday) => (
-                <Text key={weekday} style={[styles.weekday, { color: theme.muted }]}>{weekday}</Text>
-              ))}
-              {calendarCells.map((day, index) => {
-                const dateKey = day ? getDateKey(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day)) : null;
-                const wasRated = dateKey && ratedDays.includes(dateKey);
-                const canEditDay = dateKey && dateKey <= getDateKey(today);
-                const isToday = dateKey === getDateKey(today);
+        </View>
+
+        <View style={styles.toggleRow}>
+          <TouchableOpacity
+            style={[styles.toggleButton, { backgroundColor: theme.surface }, period === 'week' && { backgroundColor: theme.primaryButton }]}
+            onPress={() => setPeriod('week')}
+          >
+            <Text style={[styles.toggleText, { color: theme.muted }, period === 'week' && { color: theme.primaryButtonText }]}>Weekly</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleButton, { backgroundColor: theme.surface }, period === 'month' && { backgroundColor: theme.primaryButton }]}
+            onPress={() => setPeriod('month')}
+          >
+            <Text style={[styles.toggleText, { color: theme.muted }, period === 'month' && { color: theme.primaryButtonText }]}>Monthly</Text>
+          </TouchableOpacity>
+        </View>
+
+
+        <View style={[styles.avatarContainer, { height: sceneHeight }]}>
+          <Image
+            source={isNightTime
+              ? require('../assets/bg/night/night-bg.png')
+              : isSunriseTime
+                ? require('../assets/bg/sunrise/sunrise-bg.png')
+                : isSunsetTime
+                  ? require('../assets/bg/sunset/sunset-bg.png')
+                  : require('../assets/bg/day/day-bg.png')}
+            resizeMode="stretch"
+            style={styles.sceneBackdrop}
+            pointerEvents="none"
+          />
+          <ExpoImage
+            source={isNightTime
+              ? require('../assets/bg/night/night-clouds-moving.png')
+              : isSunriseTime
+                ? require('../assets/bg/sunrise/sunrise-clouds-moving.png')
+                : isSunsetTime
+                  ? require('../assets/bg/sunset/sunset-clouds-moving.png')
+                  : require('../assets/bg/day/day-clouds-moving.png')}
+            contentFit="fill"
+            autoplay
+            style={[styles.sceneBackdrop, { zIndex: 1 }]}
+            pointerEvents="none"
+          />
+          {report && (
+            <View style={styles.hud} pointerEvents="none">
+              {['health', 'work', 'play', 'love'].map((cat) => {
+                const average = report[cat].average;
+                const isLowest = lowestAverage !== null && average === lowestAverage;
                 return (
-                  <TouchableOpacity
-                    key={day ?? `empty-${index}`}
-                    style={styles.dayCell}
-                    onPress={() => {
-                      if (canEditDay) {
-                        setCalendarVisible(false);
-                        handleSelectDay(dateKey);
-                      }
-                    }}
-                    disabled={!canEditDay || loadingDay}
-                    accessibilityRole={canEditDay ? 'button' : undefined}
-                    accessibilityLabel={canEditDay ? `${wasRated ? 'Edit rating' : 'Add missed rating'} for ${dateKey}` : undefined}
-                  >
-                    {day ? (
-                      <View
-                        style={[
-                          styles.dayNumber,
-                          wasRated && { backgroundColor: theme.accent },
-                          isToday && { borderColor: theme.primaryButton, borderWidth: 2 },
-                        ]}
-                        accessible
-                        accessibilityLabel={`${calendarMonth.toLocaleDateString(undefined, { month: 'long' })} ${day}${wasRated ? ', rating saved' : ''}${isToday ? ', today' : ''}`}
-                      >
-                        <Text style={[styles.dayText, { color: wasRated ? '#293326' : theme.text }]}>{day}</Text>
-                      </View>
-                    ) : null}
-                  </TouchableOpacity>
+                  <GameBar
+                    key={cat}
+                    label={BAR_LABELS[cat]}
+                    value={average}
+                    color={CATEGORY_META[cat].color}
+                    glow={isLowest}
+                    dimmed={lowestAverage !== null && !isLowest}
+                  />
                 );
               })}
             </View>
-            <View style={styles.calendarLegend}>
-              {loadingCalendar ? (
-                <ActivityIndicator size="small" color={theme.accent} />
-              ) : (
-                <>
-                  <View style={[styles.legendSwatch, { backgroundColor: theme.accent }]} />
-                  <Text style={[styles.legendText, { color: theme.muted }]}>Saved · tap any past date to add or edit</Text>
-                </>
-              )}
-            </View>
+          )}
+          <View style={[styles.avatarPosition, { top: (sceneHeight) * GRASS_LINE_RATIO - avatarHeight, zIndex: 2 }]}>
+            <DashboardAvatar
+              size={avatarSize}
+              sceneWidth={width}
+              playScore={report?.play.average}
+              healthScore={report?.health.average}
+              loveScore={report?.love.average}
+              isSleeping={isSleepingTime}
+              characterId={characterProgress?.active_character ?? 'basic'}
+            />
           </View>
         </View>
-      </View>
-    </Modal>
-    <Modal
-      visible={Boolean(aiSummary)}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setAiSummary(null)}
-    >
-      <View style={styles.aiModalOverlay}>
-        <View style={[styles.aiModal, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={styles.aiModalHeader}>
-            <Text style={[styles.aiCardTitle, { color: theme.accentText }]}>AI reflection</Text>
-            <TouchableOpacity
-              style={styles.aiModalClose}
-              onPress={() => setAiSummary(null)}
-              accessibilityRole="button"
-              accessibilityLabel="Close AI reflection"
-            >
-              <Octicons name="x" size={20} color={theme.text} />
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={styles.aiModalBody} showsVerticalScrollIndicator>
-            <MarkdownText>{aiSummary ?? ''}</MarkdownText>
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-    <Modal
-      visible={charactersVisible}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setCharactersVisible(false)}
-    >
-      <View style={styles.charactersOverlay}>
-        <View style={[styles.charactersModal, { backgroundColor: theme.background, borderColor: theme.border }]}>
-          <View style={styles.charactersHeader}>
-            <Text style={[styles.dayModalTitle, { color: theme.text }]}>Characters</Text>
-            <TouchableOpacity
-              style={styles.dayModalClose}
-              onPress={() => setCharactersVisible(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Close character collection"
-            >
-              <Octicons name="x" size={20} color={theme.text} />
-            </TouchableOpacity>
-          </View>
-          {characterProgress && (
-            <>
-              <Text style={[styles.charactersSummary, { color: theme.muted }]}>
-                {characterProgress.owned_characters.length} / {CHARACTERS.length} unlocked · {characterProgress.rating_days} days rated
-              </Text>
+
+      </ScrollView>
+      <Modal
+        visible={calendarVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCalendarVisible(false)}
+      >
+        <View style={styles.calendarModalOverlay}>
+          <View style={[styles.calendarModal, { backgroundColor: theme.background, borderColor: theme.border }]}>
+            <View style={styles.calendarModalHeader}>
+              <Text style={[styles.dayModalTitle, { color: theme.text }]}>Calendar</Text>
               <TouchableOpacity
-                style={[
-                  styles.gachaButton,
-                  { backgroundColor: theme.primaryButton },
-                  (characterProgress.gacha_pulls < 1 || GACHA_CHARACTERS.every((character) => characterProgress.owned_characters.includes(character.id))) && styles.gachaButtonDisabled,
-                ]}
-                onPress={handleDrawCharacter}
-                disabled={
-                  drawingCharacter
-                  || characterProgress.gacha_pulls < 1
-                  || GACHA_CHARACTERS.every((character) => characterProgress.owned_characters.includes(character.id))
-                }
+                style={styles.dayModalClose}
+                onPress={() => setCalendarVisible(false)}
                 accessibilityRole="button"
+                accessibilityLabel="Close calendar"
               >
-                <MaterialIcons name="casino" size={22} color={theme.primaryButtonText} />
-                <Text style={[styles.gachaButtonText, { color: theme.primaryButtonText }]}>
-                  {drawingCharacter ? 'Drawing...' : `Pull a character (${characterProgress.gacha_pulls})`}
-                </Text>
+                <Octicons name="x" size={20} color={theme.text} />
               </TouchableOpacity>
-              <Text style={[styles.collectionHint, { color: theme.muted }]}>
-                Log ratings on any 3 days to unlock Leafhead. Every 7 days rated earns a pull.
-              </Text>
-              <ScrollView contentContainerStyle={styles.characterGrid}>
-                {characterProgress.owned_characters
-                  .map((characterId) => CHARACTERS.find((character) => character.id === characterId))
-                  .filter(Boolean)
-                  .map((character) => {
-                  const selected = characterProgress.active_character === character.id;
+            </View>
+            <View style={[styles.calendar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={styles.calendarHeader}>
+                <TouchableOpacity
+                  style={styles.monthArrow}
+                  onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}
+                  accessibilityRole="button"
+                  accessibilityLabel="Previous month"
+                >
+                  <Text style={[styles.monthArrowText, { color: theme.text }]}>{'\u2039'}</Text>
+                </TouchableOpacity>
+                <Text style={[styles.monthTitle, { color: theme.text }]}>
+                  {calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                </Text>
+                <TouchableOpacity
+                  style={[styles.monthArrow, isCurrentMonth && styles.disabledArrow]}
+                  onPress={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}
+                  disabled={isCurrentMonth}
+                  accessibilityRole="button"
+                  accessibilityLabel="Next month"
+                >
+                  <Text style={[styles.monthArrowText, { color: isCurrentMonth ? theme.muted : theme.text }]}>{'\u203a'}</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.calendarGrid}>
+                {WEEKDAYS.map((weekday) => (
+                  <Text key={weekday} style={[styles.weekday, { color: theme.muted }]}>{weekday}</Text>
+                ))}
+                {calendarCells.map((day, index) => {
+                  const dateKey = day ? getDateKey(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day)) : null;
+                  const wasRated = dateKey && ratedDays.includes(dateKey);
+                  const canEditDay = dateKey && dateKey <= getDateKey(today);
+                  const isToday = dateKey === getDateKey(today);
                   return (
                     <TouchableOpacity
-                      key={character.id}
-                      style={[
-                        styles.characterCard,
-                        { backgroundColor: theme.surface, borderColor: selected ? theme.accent : theme.border },
-                      ]}
-                      onPress={() => handleSelectCharacter(character.id)}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected }}
-                      accessibilityLabel={character.name}
+                      key={day ?? `empty-${index}`}
+                      style={styles.dayCell}
+                      onPress={() => {
+                        if (canEditDay) {
+                          setCalendarVisible(false);
+                          handleSelectDay(dateKey);
+                        }
+                      }}
+                      disabled={!canEditDay || loadingDay}
+                      accessibilityRole={canEditDay ? 'button' : undefined}
+                      accessibilityLabel={canEditDay ? `${wasRated ? 'Edit rating' : 'Add missed rating'} for ${dateKey}` : undefined}
                     >
-                      <View style={styles.characterPreview}>
-                        <Image
-                          source={character.sprites.idle}
-                          resizeMode="stretch"
-                          style={styles.characterPreviewSprite}
-                        />
-                      </View>
-                      <Text style={[styles.characterName, { color: theme.text }]}>{character.name}</Text>
-                      {selected && <MaterialIcons name="check-circle" size={18} color={theme.accent} />}
+                      {day ? (
+                        <View
+                          style={[
+                            styles.dayNumber,
+                            wasRated && { backgroundColor: theme.accent },
+                            isToday && { borderColor: theme.primaryButton, borderWidth: 2 },
+                          ]}
+                          accessible
+                          accessibilityLabel={`${calendarMonth.toLocaleDateString(undefined, { month: 'long' })} ${day}${wasRated ? ', rating saved' : ''}${isToday ? ', today' : ''}`}
+                        >
+                          <Text style={[styles.dayText, { color: wasRated ? '#293326' : theme.text }]}>{day}</Text>
+                        </View>
+                      ) : null}
                     </TouchableOpacity>
                   );
                 })}
-              </ScrollView>
-            </>
-          )}
-          {(gachaAnimating || gachaRevealCharacter) && (
-            <View style={styles.gachaRevealOverlay}>
-              {gachaAnimating && !gachaFlash ? (
-                <Animated.View
+              </View>
+              <View style={styles.calendarLegend}>
+                {loadingCalendar ? (
+                  <ActivityIndicator size="small" color={theme.accent} />
+                ) : (
+                  <>
+                    <View style={[styles.legendSwatch, { backgroundColor: theme.accent }]} />
+                    <Text style={[styles.legendText, { color: theme.muted }]}>Saved · tap any past date to add or edit</Text>
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={Boolean(aiSummary)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAiSummary(null)}
+      >
+        <View style={styles.aiModalOverlay}>
+          <View style={[styles.aiModal, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={styles.aiModalHeader}>
+              <Text style={[styles.aiCardTitle, { color: theme.accentText }]}>AI reflection</Text>
+              <TouchableOpacity
+                style={styles.aiModalClose}
+                onPress={() => setAiSummary(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Close AI reflection"
+              >
+                <Octicons name="x" size={20} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.aiModalBody} showsVerticalScrollIndicator>
+              <MarkdownText>{aiSummary ?? ''}</MarkdownText>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={charactersVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCharactersVisible(false)}
+      >
+        <View style={styles.charactersOverlay}>
+          <View style={[styles.charactersModal, { backgroundColor: theme.background, borderColor: theme.border }]}>
+            <View style={styles.charactersHeader}>
+              <Text style={[styles.dayModalTitle, { color: theme.text }]}>Characters</Text>
+              <TouchableOpacity
+                style={styles.dayModalClose}
+                onPress={() => setCharactersVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close character collection"
+              >
+                <Octicons name="x" size={20} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+            {characterProgress && (
+              <>
+                <Text style={[styles.charactersSummary, { color: theme.muted }]}>
+                  {characterProgress.owned_characters.length} / {CHARACTERS.length} unlocked · {characterProgress.rating_days} days rated
+                </Text>
+                <TouchableOpacity
                   style={[
-                    styles.fallingStar,
-                    {
-                      transform: [
-                        { translateX: fallingStarX },
-                        { translateY: fallingStarY },
-                      ],
-                    },
+                    styles.gachaButton,
+                    { backgroundColor: theme.primaryButton },
+                    (characterProgress.gacha_pulls < 1 || GACHA_CHARACTERS.every((character) => characterProgress.owned_characters.includes(character.id))) && styles.gachaButtonDisabled,
                   ]}
+                  onPress={handleDrawCharacter}
+                  disabled={
+                    drawingCharacter
+                    || characterProgress.gacha_pulls < 1
+                    || GACHA_CHARACTERS.every((character) => characterProgress.owned_characters.includes(character.id))
+                  }
+                  accessibilityRole="button"
                 >
-                  <View style={styles.starTrail}>
-                    <View style={[styles.starTrailLine, styles.starTrailGlow]} />
-                    <View style={[styles.starTrailLine, styles.starTrailMid]} />
-                    <View style={[styles.starTrailLine, styles.starTrailCore]} />
-                  </View>
-                  <MaterialIcons name="star" size={48} color="#ffe36e" />
-                  <MaterialIcons name="auto-awesome" size={24} color="#fff5bd" style={styles.starSparkle} />
-                </Animated.View>
-              ) : gachaAnimating ? (
-                <>
+                  <MaterialIcons name="casino" size={22} color={theme.primaryButtonText} />
+                  <Text style={[styles.gachaButtonText, { color: theme.primaryButtonText }]}>
+                    {drawingCharacter ? 'Drawing...' : `Pull a character (${characterProgress.gacha_pulls})`}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={[styles.collectionHint, { color: theme.muted }]}>
+                  Log ratings on any 3 days to unlock Leafhead. Every 7 days rated earns a pull.
+                </Text>
+                <ScrollView contentContainerStyle={styles.characterGrid}>
+                  {characterProgress.owned_characters
+                    .map((characterId) => CHARACTERS.find((character) => character.id === characterId))
+                    .filter(Boolean)
+                    .map((character) => {
+                      const selected = characterProgress.active_character === character.id;
+                      return (
+                        <TouchableOpacity
+                          key={character.id}
+                          style={[
+                            styles.characterCard,
+                            { backgroundColor: theme.surface, borderColor: selected ? theme.accent : theme.border },
+                          ]}
+                          onPress={() => handleSelectCharacter(character.id)}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected }}
+                          accessibilityLabel={character.name}
+                        >
+                          <View style={styles.characterPreview}>
+                            <Image
+                              source={character.sprites.idle}
+                              resizeMode="stretch"
+                              style={styles.characterPreviewSprite}
+                            />
+                          </View>
+                          <Text style={[styles.characterName, { color: theme.text }]}>{character.name}</Text>
+                          {selected && <MaterialIcons name="check-circle" size={18} color={theme.accent} />}
+                        </TouchableOpacity>
+                      );
+                    })}
+                </ScrollView>
+              </>
+            )}
+            {(gachaAnimating || gachaRevealCharacter) && (
+              <View style={styles.gachaRevealOverlay}>
+                {gachaAnimating && !gachaFlash ? (
                   <Animated.View
-                    pointerEvents="none"
-                    style={[styles.gachaWhiteFlash, { opacity: gachaFlashOpacity }]}
-                  />
-                  <Animated.View
-                    pointerEvents="none"
                     style={[
-                      styles.gachaFlashBurst,
+                      styles.fallingStar,
                       {
-                        opacity: gachaFlashOpacity,
-                        transform: [{ scale: gachaFlashScale }],
+                        transform: [
+                          { translateX: fallingStarX },
+                          { translateY: fallingStarY },
+                        ],
                       },
                     ]}
-                  />
-                </>
-              ) : (
-                <View style={[styles.gachaRevealCard, { backgroundColor: theme.surface, borderColor: theme.accent }]}>
-                  <MaterialIcons name="auto-awesome" size={28} color={theme.accent} />
-                  <Text style={[styles.gachaRevealTitle, { color: theme.text }]}>A new character!</Text>
-                  <View style={styles.gachaRevealPreview}>
-                    <Image
-                      source={gachaRevealCharacter.sprites.idle}
-                      resizeMode="stretch"
-                      style={styles.gachaRevealSprite}
-                    />
-                  </View>
-                  <Text style={[styles.gachaRevealName, { color: theme.text }]}>{gachaRevealCharacter.name}</Text>
-                  <TouchableOpacity
-                    style={[styles.gachaRevealButton, { backgroundColor: theme.primaryButton }]}
-                    onPress={() => setGachaRevealCharacter(null)}
-                    accessibilityRole="button"
                   >
-                    <Text style={[styles.gachaButtonText, { color: theme.primaryButtonText }]}>Awesome!</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-      </View>
-    </Modal>
-    <RewardModal rewards={rewardMessages} onClose={closeRewardModal} />
-    <Modal
-      visible={Boolean(selectedDate)}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setSelectedDate(null)}
-    >
-      <View style={styles.dayModalOverlay}>
-        <View style={[styles.dayModal, { backgroundColor: theme.background }]}>
-          <View style={styles.dayModalHeader}>
-            <Text style={[styles.dayModalTitle, { color: theme.text }]}>
-              {selectedDate && ratedDays.includes(selectedDate) ? 'Edit rating' : 'Add missed rating'}
-            </Text>
-            <TouchableOpacity
-              style={styles.dayModalClose}
-              onPress={() => setSelectedDate(null)}
-              disabled={savingDay}
-              accessibilityRole="button"
-              accessibilityLabel="Close rating editor"
-            >
-              <Octicons name="x" size={20} color={theme.text} />
-            </TouchableOpacity>
+                    <View style={styles.starTrail}>
+                      <View style={[styles.starTrailLine, styles.starTrailGlow]} />
+                      <View style={[styles.starTrailLine, styles.starTrailMid]} />
+                      <View style={[styles.starTrailLine, styles.starTrailCore]} />
+                    </View>
+                    <MaterialIcons name="star" size={48} color="#ffe36e" />
+                    <MaterialIcons name="auto-awesome" size={24} color="#fff5bd" style={styles.starSparkle} />
+                  </Animated.View>
+                ) : gachaAnimating ? (
+                  <>
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[styles.gachaWhiteFlash, { opacity: gachaFlashOpacity }]}
+                    />
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.gachaFlashBurst,
+                        {
+                          opacity: gachaFlashOpacity,
+                          transform: [{ scale: gachaFlashScale }],
+                        },
+                      ]}
+                    />
+                  </>
+                ) : (
+                  <View style={[styles.gachaRevealCard, { backgroundColor: theme.surface, borderColor: theme.accent }]}>
+                    <MaterialIcons name="auto-awesome" size={28} color={theme.accent} />
+                    <Text style={[styles.gachaRevealTitle, { color: theme.text }]}>A new character!</Text>
+                    <View style={styles.gachaRevealPreview}>
+                      <Image
+                        source={gachaRevealCharacter.sprites.idle}
+                        resizeMode="stretch"
+                        style={styles.gachaRevealSprite}
+                      />
+                    </View>
+                    <Text style={[styles.gachaRevealName, { color: theme.text }]}>{gachaRevealCharacter.name}</Text>
+                    <TouchableOpacity
+                      style={[styles.gachaRevealButton, { backgroundColor: theme.primaryButton }]}
+                      onPress={() => setGachaRevealCharacter(null)}
+                      accessibilityRole="button"
+                    >
+                      <Text style={[styles.gachaButtonText, { color: theme.primaryButtonText }]}>Awesome!</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
-          <Text style={[styles.dayModalDate, { color: theme.muted }]}>
-            {selectedDate ? new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : ''}
-          </Text>
-          {loadingDay || !dayScores ? (
-            <ActivityIndicator color={theme.accent} style={styles.dayLoading} />
-          ) : (
-            <ScrollView keyboardShouldPersistTaps="handled">
-              {dayPage === 1 ? (
-                <>
-                  {Object.entries(CATEGORY_META).map(([category, meta]) => (
-                    <LinearRatingSlider
-                      key={category}
-                      value={dayScores[category]}
-                      onChange={(score) => setDayScores((previous) => ({ ...previous, [category]: score }))}
-                      color={meta.color}
-                      label={meta.label}
-                    />
-                  ))}
-                  <TouchableOpacity
-                    style={[styles.daySaveButton, styles.dayNextButton, { backgroundColor: theme.primaryButton }]}
-                    onPress={() => setDayPage(2)}
-                    accessibilityRole="button"
-                  >
-                    <Text style={[styles.daySaveText, { color: theme.primaryButtonText }]}>Next</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <Text style={[styles.dayPageSubtitle, { color: theme.muted }]}>Add or edit the optional note for this day.</Text>
-                  <TextInput
-                    style={[styles.dayNoteInput, { color: theme.text, backgroundColor: theme.surface, borderColor: theme.border }]}
-                    value={dayNote}
-                    onChangeText={setDayNote}
-                    placeholderTextColor={theme.muted}
-                    multiline
-                  />
-                  <View style={styles.dayButtonRow}>
-                    <TouchableOpacity
-                      style={[styles.dayBackButton, { borderColor: theme.border }]}
-                      onPress={() => setDayPage(1)}
-                      disabled={savingDay}
-                      accessibilityRole="button"
-                    >
-                      <Text style={[styles.dayBackText, { color: theme.text }]}>Back</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.daySaveButton, styles.dayNextButton, { backgroundColor: theme.primaryButton }, savingDay && styles.daySaveDisabled]}
-                      onPress={handleSaveDay}
-                      disabled={savingDay}
-                      accessibilityRole="button"
-                    >
-                      <Text style={[styles.daySaveText, { color: theme.primaryButtonText }]}>
-                        {savingDay ? 'Saving...' : selectedDate && ratedDays.includes(selectedDate) ? 'Save changes' : 'Save rating'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-            </ScrollView>
-          )}
         </View>
-      </View>
-    </Modal>
+      </Modal>
+      <RewardModal rewards={rewardMessages} onClose={closeRewardModal} />
+      <Modal
+        visible={Boolean(selectedDate)}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedDate(null)}
+      >
+        <View style={styles.dayModalOverlay}>
+          <View style={[styles.dayModal, { backgroundColor: theme.background }]}>
+            <View style={styles.dayModalHeader}>
+              <Text style={[styles.dayModalTitle, { color: theme.text }]}>
+                {selectedDate && ratedDays.includes(selectedDate) ? 'Edit rating' : 'Add missed rating'}
+              </Text>
+              <TouchableOpacity
+                style={styles.dayModalClose}
+                onPress={() => setSelectedDate(null)}
+                disabled={savingDay}
+                accessibilityRole="button"
+                accessibilityLabel="Close rating editor"
+              >
+                <Octicons name="x" size={20} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.dayModalDate, { color: theme.muted }]}>
+              {selectedDate ? new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : ''}
+            </Text>
+            {loadingDay || !dayScores ? (
+              <ActivityIndicator color={theme.accent} style={styles.dayLoading} />
+            ) : (
+              <ScrollView keyboardShouldPersistTaps="handled">
+                {dayPage === 1 ? (
+                  <>
+                    {Object.entries(CATEGORY_META).map(([category, meta]) => (
+                      <LinearRatingSlider
+                        key={category}
+                        value={dayScores[category]}
+                        onChange={(score) => setDayScores((previous) => ({ ...previous, [category]: score }))}
+                        color={meta.color}
+                        label={meta.label}
+                      />
+                    ))}
+                    <TouchableOpacity
+                      style={[styles.daySaveButton, styles.dayNextButton, { backgroundColor: theme.primaryButton }]}
+                      onPress={() => setDayPage(2)}
+                      accessibilityRole="button"
+                    >
+                      <Text style={[styles.daySaveText, { color: theme.primaryButtonText }]}>Next</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.dayPageSubtitle, { color: theme.muted }]}>Add or edit the optional note for this day.</Text>
+                    <TextInput
+                      style={[styles.dayNoteInput, { color: theme.text, backgroundColor: theme.surface, borderColor: theme.border }]}
+                      value={dayNote}
+                      onChangeText={setDayNote}
+                      placeholderTextColor={theme.muted}
+                      multiline
+                    />
+                    <View style={styles.dayButtonRow}>
+                      <TouchableOpacity
+                        style={[styles.dayBackButton, { borderColor: theme.border }]}
+                        onPress={() => setDayPage(1)}
+                        disabled={savingDay}
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.dayBackText, { color: theme.text }]}>Back</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.daySaveButton, styles.dayNextButton, { backgroundColor: theme.primaryButton }, savingDay && styles.daySaveDisabled]}
+                        onPress={handleSaveDay}
+                        disabled={savingDay}
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.daySaveText, { color: theme.primaryButtonText }]}>
+                          {savingDay ? 'Saving...' : selectedDate && ratedDays.includes(selectedDate) ? 'Save changes' : 'Save rating'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -890,13 +917,11 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   title: { fontSize: 26, fontWeight: '700', color: '#fff' },
   headerActions: { flexDirection: 'row', gap: 8 },
-  avatarContainer: { position: 'relative', width: '100%', alignItems: 'center', marginTop: 0, marginBottom: 20, overflow: 'hidden'},
+  avatarContainer: { position: 'relative', width: '100%', alignItems: 'center', marginTop: 0, marginBottom: 20, overflow: 'hidden' },
   sceneBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%', zIndex: 0 },
   avatarPosition: { position: 'absolute', alignSelf: 'center', zIndex: 1 },
   avatarViewport: { overflow: 'hidden' },
   avatarSprite: { position: 'absolute', top: 0 },
-  dialGrid: { zIndex: 2, flexDirection: 'row', width: '100%' },
-  dialItem: { flex: 1, alignItems: 'center' },
   calendar: { borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 20 },
   calendarModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)', justifyContent: 'center', padding: 20 },
   calendarModal: { borderWidth: 1, borderRadius: 10, padding: 18 },
@@ -925,7 +950,6 @@ const styles = StyleSheet.create({
   toggleButtonActive: { backgroundColor: '#6C5CE7' },
   toggleText: { color: '#9aa0a6', fontWeight: '600' },
   toggleTextActive: { color: '#fff' },
-  dimmedDial: { opacity: 0.45 },
   aiButton: {
     width: 44,
     height: 44,
@@ -993,4 +1017,44 @@ const styles = StyleSheet.create({
   daySaveButton: { height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   daySaveDisabled: { opacity: 0.6 },
   daySaveText: { fontSize: 16, lineHeight: 20, fontWeight: '700', includeFontPadding: false },
+  hud: { position: 'absolute', top: 10, left: 12, width: '58%', gap: 6, zIndex: 3 },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dimmedBar: { opacity: 0.55 },
+  barLabel: {
+    width: 60,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#fff',
+    textShadowColor: '#000',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  barTrack: {
+    height: 14,
+    borderWidth: 2,
+    borderColor: '#1b1d2a',
+    borderRadius: 3,
+    backgroundColor: 'rgba(20, 22, 32, 0.75)',
+    overflow: 'hidden',
+  },
+  barTrackGlow: { flex: 1, borderRadius: 4 },
+  barTrackGlowActive: {
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
+  },
+  barFill: { position: 'absolute', top: 0, bottom: 0, left: 0 },
+  barShine: { position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: 'rgba(255, 255, 255, 0.3)' },
+  barTick: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: 'rgba(20, 22, 32, 0.6)' },
+  barValue: {
+    width: 30,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'right',
+    textShadowColor: '#000',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
 });
